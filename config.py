@@ -9,8 +9,8 @@ OWNER_IDS = [
 OWNER_ROLE_ID = 0  
 
 # أسماء الرومات والرتب التي سيقوم البوت بإنشائها تلقائياً
-QUARANTINE_CHANNEL_NAME = "quarantine"     # روم الحجر الصحي
-QUARANTINE_ROLE_NAME = "Quarantined"       # رتبة الحجر (تنسحب باقي الرتب وتبقى هذه فقط)
+QUARANTINE_CHANNEL_NAME = "quarantine"     # روم الحجر الصحي (بالإنجليزية)
+QUARANTINE_ROLE_NAME = "محجور"             # رتبة الحجر (تنسحب باقي الرومات وتبقى هذه فقط)
 
 TICKET_CATEGORY_NAME = "Tickets System"    # كاتيجوري التذاكر
 ADMIN_REVIEW_CHANNEL_NAME = "admin-review" # روم مراجعة الإدارة للتقديمات والتذاكر
@@ -18,9 +18,9 @@ ADMIN_REVIEW_CHANNEL_NAME = "admin-review" # روم مراجعة الإدارة 
 SUPPORT_ROLE_NAME = "Support Team"         # رتبة الدعم للتذاكر
 APPLY_STAFF_ROLE_NAME = "Staff Manager"    # رتبة مسؤولي التقديمات
 
-# الرتب المحمية من العبث
+# الرتب المحمية من العبث (ضع أيديات رتب الإدارة المهمة هنا لكي يحميه البوت)
 PROTECTED_ROLE_IDS = [
-    # 000000000000000000,  # ضع أيديات الرتب المهمة هنا
+    # 000000000000000000, 
 ]
 
 # رسائل اللوحات
