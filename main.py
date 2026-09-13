@@ -235,7 +235,8 @@ class AdminDecisionView(View):
         accepted_role = discord.utils.get(guild.roles, name="مسؤول-التقديم")
         if (accepted_role and accepted_role in interaction.user.roles) or is_exempted(interaction.user):
             try:
-                await self.member.send("❌ نأسف لك، تم رفض طلب تقديمك من الإدارة.")
+                # تم تحديث رسالة الرفض بالصيغة المطلوبة
+                await self.member.send("❌ نأسف لك، تم رفض طلب تقديمك من الإدارة. عدل لي الرفض بعد رد الى كذا")
             except:
                 pass
             await interaction.message.edit(view=None)
@@ -405,12 +406,17 @@ async def on_voice_state_update(member: discord.Member, before: discord.VoiceSta
         return
 
     if member.id == bot.user.id:
-        if before.channel and before.channel.id == VOICE_CHANNEL_ID and after.channel is None:
+        if before.channel and before.channel.id == VOICE_CHANNEL_ID and (after.channel is None or after.channel.id != VOICE_CHANNEL_ID):
             await asyncio.sleep(1)
             guild = member.guild
             channel = guild.get_channel(VOICE_CHANNEL_ID)
             if channel and isinstance(channel, discord.VoiceChannel):
                 try:
+                    if guild.me.voice:
+                        try:
+                            await guild.me.voice.channel.disconnect()
+                        except:
+                            pass
                     await channel.connect()
                 except Exception as e:
                     print(f"فشل إعادة الاتصال بالروم الصوتي تلقائياً: {e}")
