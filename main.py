@@ -344,30 +344,7 @@ async def removedeputy(interaction: discord.Interaction, member: discord.Member)
     await interaction.response.send_message(f"✅ تم بنجاح إزالة صفة النائب عن العضو {member.mention}.", ephemeral=True)
 
 
-@bot.tree.command(name="النواب", description="عرض قائمة الأعضاء المعينين كنواب حالياً في البوت")
-async def shownawwab(interaction: discord.Interaction):
-    global deputy_user_ids
-    if not deputy_user_ids:
-        await interaction.response.send_message("ℹ️ لا يوجد أي أعضاء معينين كنواب حالياً.", ephemeral=True)
-        return
-
-    nawwab_list = []
-    for uid in deputy_user_ids:
-        m = interaction.guild.get_member(uid)
-        if m:
-            nawwab_list.append(f"• {m.mention} (`{m.name}`)")
-        else:
-            nawwab_list.append(f"• `ID: {uid}` (غير موجود بالسيرفر)")
-
-    embed = discord.Embed(
-        title=f"📋 قائمة النواب الحاليين ({len(deputy_user_ids)})",
-        description="\n".join(nawwab_list),
-        color=discord.Color.blue()
-    )
-    await interaction.response.send_message(embed=embed, ephemeral=True)
-
-
-# ==================== أوامر حماية الأشخاص والرتب ====================
+# ==================== أوامر الحماية الشاملة ====================
 
 @bot.tree.command(name="حماية_شخص", description="إضافة شخص معين إلى قائمة المحميين فردياً")
 @discord.app_commands.describe(member="اختر العضو المراد حمايته")
@@ -395,29 +372,6 @@ async def unprotect_person(interaction: discord.Interaction, member: discord.Mem
         await interaction.response.send_message(f"🔓 تمت إزالة الحماية عن العضو {member.mention} بنجاح.", ephemeral=True)
     else:
         await interaction.response.send_message(f"❌ العضو {member.mention} ليس موجوداً في قائمة الأشخاص المحميين أساساً.", ephemeral=True)
-
-
-@bot.tree.command(name="المحميين", description="عرض قائمة الأشخاص المحميين فردياً حالياً")
-async def shownprotectedpeople(interaction: discord.Interaction):
-    global protected_users_list
-    if not protected_users_list:
-        await interaction.response.send_message("ℹ️ لا يوجد أي أشخاص محميين بشكل فردي حالياً.", ephemeral=True)
-        return
-
-    users_list = []
-    for uid in protected_users_list:
-        m = interaction.guild.get_member(uid)
-        if m:
-            users_list.append(f"• {m.mention} (`{m.name}`)")
-        else:
-            users_list.append(f"• `ID: {uid}` (غير موجود بالسيرفر)")
-
-    embed = discord.Embed(
-        title=f"🛡️ قائمة الأشخاص المحميين ({len(protected_users_list)})",
-        description="\n".join(users_list),
-        color=discord.Color.green()
-    )
-    await interaction.response.send_message(embed=embed, ephemeral=True)
 
 
 @bot.tree.command(name="حماية_رتبه", description="إضافة رتبه إلى قائمة الرتب المحمية")
@@ -448,28 +402,63 @@ async def unprotect_role(interaction: discord.Interaction, role: discord.Role):
         await interaction.response.send_message(f"❌ الرتبه {role.mention} ليست موجودة في قائمة الرتب المحمية أساساً.", ephemeral=True)
 
 
-@bot.tree.command(name="الرتب_المحميه", description="عرض قائمة الرتب المحمية حالياً")
-async def shownprotectedroles(interaction: discord.Interaction):
-    global protected_roles_list
-    if not protected_roles_list:
-        await interaction.response.send_message("ℹ️ لا توجد أي رتب محمية حالياً.", ephemeral=True)
-        return
-
-    roles_list = []
-    for rid in protected_roles_list:
-        r = interaction.guild.get_role(rid)
-        if r:
-            roles_list.append(f"• {r.mention} (`{r.name}`)")
-        else:
-            roles_list.append(f"• `ID: {rid}` (رتبه غير موجودة بالسيرفر)")
+@bot.tree.command(name="قائمة_الحماية", description="عرض لوحة شاملة لجميع الأشخاص والرتب المحمية والنواب")
+async def protection_dashboard(interaction: discord.Interaction):
+    global protected_users_list, protected_roles_list, deputy_user_ids
 
     embed = discord.Embed(
-        title=f"🛡️ قائمة الرتب المحمية ({len(protected_roles_list)})",
-        description="\n".join(roles_list),
-        color=discord.Color.blue()
+        title="🛡️ لوحة معلومات الحماية الشاملة",
+        description="إليك تفاصيل الأشخاص والرتب والنواب المحميين في السيرفر حالياً:",
+        color=discord.Color.gold()
     )
+
+    # 1. تجميع الأشخاص المحميين فردياً
+    users_text = "لا يوجد"
+    if protected_users_list:
+        valid_users = []
+        for uid in protected_users_list:
+            m = interaction.guild.get_member(uid)
+            if m:
+                valid_users.append(f"• {m.mention} (`{m.name}`)")
+            else:
+                valid_users.append(f"• `ID: {uid}` (غير موجود)")
+        if valid_users:
+            users_text = "\n".join(valid_users)
+    embed.add_field(name=f"👤 الأشخاص المحميين ({len(protected_users_list)})", value=users_text, inline=False)
+
+    # 2. تجميع الرتب المحمية
+    roles_text = "لا توجد"
+    if protected_roles_list:
+        valid_roles = []
+        for rid in protected_roles_list:
+            r = interaction.guild.get_role(rid)
+            if r:
+                valid_roles.append(f"• {r.mention} (`{r.name}`)")
+            else:
+                valid_roles.append(f"• `ID: {rid}` (غير موجودة)")
+        if valid_roles:
+            roles_text = "\n".join(valid_roles)
+    embed.add_field(name=f"👑 الرتب المحمية ({len(protected_roles_list)})", value=roles_text, inline=False)
+
+    # 3. تجميع النواب
+    nawwab_text = "لا يوجد"
+    if deputy_user_ids:
+        valid_nawwab = []
+        for uid in deputy_user_ids:
+            m = interaction.guild.get_member(uid)
+            if m:
+                valid_nawwab.append(f"• {m.mention} (`{m.name}`)")
+            else:
+                valid_nawwab.append(f"• `ID: {uid}` (غير موجود)")
+        if valid_nawwab:
+            nawwab_text = "\n".join(valid_nawwab)
+    embed.add_field(name=f"🛡️ النواب المعتمدون ({len(deputy_user_ids)})", value=nawwab_text, inline=False)
+
+    embed.set_footer(text=interaction.guild.name, icon_url=interaction.guild.icon.url if interaction.guild.icon else None)
     await interaction.response.send_message(embed=embed, ephemeral=True)
 
+
+# ==================== الأوامر الإدارية الأخرى ====================
 
 @bot.tree.command(name="فك_الحجر", description="إخراج عضو من الحجر وإعادة رتبه السابقة")
 @discord.app_commands.describe(member="اختر العضو المراد إخراجه من الحجر")
