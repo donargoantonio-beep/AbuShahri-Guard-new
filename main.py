@@ -15,26 +15,27 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 
 saved_roles = {}
 protected_roles_list = []
-deputy_role_id = None
+deputy_user_id = None  # آيدي العضو المعين كنائب
 
 # ضع آيدي الروم الصوتي الدائم هنا (مثال: 123456789012345678)
 VOICE_CHANNEL_ID = 0  
 
-# دالة التحقق: المالك أو النائب المعين فقط (مع إرسال رسالة تنبيه مخصصة عند الرفض)
+# دالة التحقق من الصلاحيات (المالك أو النائب المحدد فقط)
 async def check_owner_or_deputy_perm(interaction: discord.Interaction):
     if interaction.user.id == interaction.guild.owner_id:
         return True
-    if deputy_role_id and any(r.id == deputy_role_id for r in interaction.user.roles):
+    if deputy_user_id and interaction.user.id == deputy_user_id:
         return True
     
-    # رسالة الرفض المخصصة عند محاولة الاستخدام بدون صلاحية
     await interaction.response.send_message(
         "❌ عذراً، هذه الصلاحيات مخصصة للمالك فقط، وللحصول عليها يرجى التواصل مع مالك البوت: **`ii.ih`**", 
         ephemeral=True
     )
     return False
 
-# ==================== 1. نظام الحماية (Anti-Nuke) ====================
+# ==================== نظام الحماية الشامل (النيوك ورومات الحذف) ====================
+
+# 1. حماية سحب الرتب المحمية
 @bot.event
 async def on_member_update(before: discord.Member, after: discord.Member):
     if len(before.roles) > len(after.roles):
@@ -57,7 +58,7 @@ async def on_member_update(before: discord.Member, after: discord.Member):
                 except:
                     pass
 
-                if attacker and attacker.id != guild.owner_id and not attacker.bot:
+                if attacker and attacker.id != guild.owner_id and (deputy_user_id is None or attacker.id != deputy_user_id) and not attacker.bot:
                     jail_role = discord.utils.get(guild.roles, name="قوانين-الحجر")
                     if not jail_role:
                         jail_role = await guild.create_role(name="قوانين-الحجر", color=discord.Color.dark_grey())
@@ -85,7 +86,61 @@ async def on_member_update(before: discord.Member, after: discord.Member):
                         await admin_review.send(f"🚨 **تنبيه أمني صارم:** حاول العضو {attacker.mention} سحب رتبة محمية (`{role.name}`). تم سحب جميع رتبه وتحويله إلى `quarantine-zone` وإرجاع الرتبة المحمية فوراً!")
                 break
 
-# ==================== 2. نظام التقديم ====================
+# 2. حماية حذف الرومات (نصية أو صوتية) وإعادة إنشائها وتحويل المخرب للحجر
+@bot.event
+async def on_guild_channel_delete(channel: discord.abc.GuildChannel):
+    guild = channel.guild
+    attacker = None
+    try:
+        async for entry in guild.audit_logs(limit=5, action=discord.AuditLogAction.channel_delete):
+            if entry.target.id == channel.id:
+                attacker = entry.user
+                break
+    except:
+        pass
+
+    # محاولة إعادة إنشاء الروم بنفس الاسم والنوع فوراً
+    try:
+        if isinstance(channel, discord.TextChannel):
+            await guild.create_text_channel(name=channel.name, category=channel.category, overwrites=channel.overwrites, topic=channel.topic)
+        elif isinstance(channel, discord.VoiceChannel):
+            await guild.create_voice_channel(name=channel.name, category=channel.category, overwrites=channel.overwrites, bitrate=channel.bitrate, user_limit=channel.user_limit)
+        elif isinstance(channel, discord.StageChannel):
+            await guild.create_stage_channel(name=channel.name, category=channel.category, overwrites=channel.overwrites)
+    except Exception as e:
+        print(f"Failed to recreate deleted channel: {e}")
+
+    # معاقبة الفاعل إذا لم يكن المالك أو النائب أو بوت
+    if attacker and attacker.id != guild.owner_id and (deputy_user_id is None or attacker.id != deputy_user_id) and not attacker.bot:
+        try:
+            member = guild.get_member(attacker.id)
+            if member:
+                jail_role = discord.utils.get(guild.roles, name="قوانين-الحجر")
+                if not jail_role:
+                    jail_role = await guild.create_role(name="قوانين-الحجر", color=discord.Color.dark_grey())
+                    
+                jail_channel = discord.utils.get(guild.text_channels, name="quarantine-zone")
+                if not jail_channel:
+                    overwrites = {
+                        guild.default_role: discord.PermissionOverwrite(view_channel=False),
+                        jail_role: discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True)
+                    }
+                    jail_channel = await guild.create_text_channel("quarantine-zone", overwrites=overwrites)
+                else:
+                    await jail_channel.set_permissions(jail_role, view_channel=True, send_messages=True, read_message_history=True)
+                    await jail_channel.set_permissions(guild.default_role, view_channel=False)
+
+                saved_roles[member.id] = [r for r in member.roles if r != guild.default_role and r != jail_role]
+                await member.edit(roles=[jail_role])
+
+                admin_review = discord.utils.get(guild.text_channels, name="admin-review")
+                if admin_review:
+                    await admin_review.send(f"🚨 **تنبيه أمني صارم (حذف روم):** قام العضو {member.mention} بحذف الروم (`{channel.name}`). تم سحب جميع رتبه، وتحويله إلى `quarantine-zone`، ومحاولة إعادة إنشاء الروم!")
+        except Exception as e:
+            print(f"Error punishing channel deleter: {e}")
+
+
+# ==================== الأجزاء التفاعلية (للتذاكر والتقديم) ====================
 class ApplicationModal(Modal, title="نموذج التقديم للإدارة"):
     q1 = TextInput(label="الاسم", placeholder="اكتب اسمك هنا...", required=True)
     q2 = TextInput(label="العمر", placeholder="اكتب عمرك...", required=True)
@@ -125,7 +180,7 @@ class AdminDecisionView(View):
     async def accept_app(self, interaction: discord.Interaction, button: Button):
         guild = interaction.guild
         accepted_role = discord.utils.get(guild.roles, name="مسؤول-التقديم")
-        if (accepted_role and accepted_role in interaction.user.roles) or (interaction.user.id == interaction.guild.owner_id) or (deputy_role_id and any(r.id == deputy_role_id for r in interaction.user.roles)):
+        if (accepted_role and accepted_role in interaction.user.roles) or (interaction.user.id == interaction.guild.owner_id) or (deputy_user_id and interaction.user.id == deputy_user_id):
             try:
                 await self.member.send("🎉 مبروك! تم **قبول** طلب تقديمك للإدارة.")
             except:
@@ -139,7 +194,7 @@ class AdminDecisionView(View):
     async def reject_app(self, interaction: discord.Interaction, button: Button):
         guild = interaction.guild
         accepted_role = discord.utils.get(guild.roles, name="مسؤول-التقديم")
-        if (accepted_role and accepted_role in interaction.user.roles) or (interaction.user.id == interaction.guild.owner_id) or (deputy_role_id and any(r.id == deputy_role_id for r in interaction.user.roles)):
+        if (accepted_role and accepted_role in interaction.user.roles) or (interaction.user.id == interaction.guild.owner_id) or (deputy_user_id and interaction.user.id == deputy_user_id):
             try:
                 await self.member.send("❌ نأسف لك، تم **رفض** طلب تقديمك للإدارة في الوقت الحالي.")
             except:
@@ -149,8 +204,6 @@ class AdminDecisionView(View):
         else:
             await interaction.response.send_message("❌ عذراً، هذه الصلاحيات مخصصة للمالك فقط، وللحصول عليها يرجى التواصل مع مالك البوت: **`ii.ih`**", ephemeral=True)
 
-
-# ==================== 3. نظام التذاكر ====================
 class CloseTicketButton(View):
     def __init__(self):
         super().__init__(timeout=None)
@@ -159,7 +212,7 @@ class CloseTicketButton(View):
     async def close_ticket(self, interaction: discord.Interaction, button: Button):
         guild = interaction.guild
         ticket_role = discord.utils.get(guild.roles, name="مسؤول-التذاكر")
-        if (ticket_role and ticket_role in interaction.user.roles) or (interaction.user.id == interaction.guild.owner_id) or (deputy_role_id and any(r.id == deputy_role_id for r in interaction.user.roles)):
+        if (ticket_role and ticket_role in interaction.user.roles) or (interaction.user.id == interaction.guild.owner_id) or (deputy_user_id and interaction.user.id == deputy_user_id):
             await interaction.response.send_message("⏳ جاري إغلاق التذكرة وحذف الروم...", ephemeral=True)
             await asyncio.sleep(2)
             await interaction.channel.delete()
@@ -199,9 +252,9 @@ class TicketButtonView(View):
         await interaction.response.send_message(f"✅ تم فتح تذكرتك بنجاح: {ticket_channel.mention}", ephemeral=True)
 
 
-# ==================== 4. أوامر الـ Slash Commands ====================
+# ==================== الأوامر الكاملة (Slash Commands) ====================
 
-@bot.tree.command(name="setup", description="إعداد رومات النظام الأساسية والتذاكر والتقديم تلقائياً")
+@bot.tree.command(name="setup", description="إعداد رومات النظام الأساسية والتذاكر والتقديم تلقائياً بأمر البوت")
 async def setup(interaction: discord.Interaction):
     if not await check_owner_or_deputy_perm(interaction):
         return
@@ -251,10 +304,10 @@ async def setup(interaction: discord.Interaction):
     embed_apply = discord.Embed(title="التقديم لفريق الإدارة", description="اضغط على الزر أدناه لتعبئة استبيان التقديم.", color=discord.Color.purple())
     await apply_panel.send(embed=embed_apply, view=ApplicationButtonView())
 
-    await interaction.followup.send("✅ تم إعداد رومات النظام والتذاكر والتقديم بنجاح!", ephemeral=True)
+    await interaction.followup.send("✅ تم إعداد رومات النظام والتذاكر والتقديم بنجاح عبر البوت!", ephemeral=True)
 
 
-@bot.tree.command(name="voice", description="تحديد روم صوتي دائم للبوت يدخله تلقائياً")
+@bot.tree.command(name="voice", description="تحديد روم صوتي دائم للبوت يدخله تلقائياً بأمر البوت")
 @discord.app_commands.describe(voice_channel="اختر الروم الصوتي من سيرفرك")
 async def voice_command(interaction: discord.Interaction, voice_channel: discord.VoiceChannel):
     if not await check_owner_or_deputy_perm(interaction):
@@ -272,19 +325,19 @@ async def voice_command(interaction: discord.Interaction, voice_channel: discord
         await interaction.followup.send(f"❌ حدث خطأ أثناء الاتصال بالروم: {e}", ephemeral=True)
 
 
-@bot.tree.command(name="setrole", description="تعيين رتبة النائب للتحكم بالبوت")
-@discord.app_commands.describe(role="اختر رتبة النائب")
-async def setrole(interaction: discord.Interaction, role: discord.Role):
+@bot.tree.command(name="setdeputy", description="تعيين شخص معين كنائب للتحكم بالبوت بأمر البوت")
+@discord.app_commands.describe(member="اختر العضو المراد تعيينه كنائب")
+async def setdeputy(interaction: discord.Interaction, member: discord.Member):
     if interaction.user.id != interaction.guild.owner_id:
         await interaction.response.send_message("❌ عذراً، هذه الصلاحيات مخصصة للمالك فقط، وللحصول عليها يرجى التواصل مع مالك البوت: **`ii.ih`**", ephemeral=True)
         return
 
-    global deputy_role_id
-    deputy_role_id = role.id
-    await interaction.response.send_message(f"✅ تم تعيين رتبة **{role.name}** كـ نائب صاحب البوت بنجاح!", ephemeral=True)
+    global deputy_user_id
+    deputy_user_id = member.id
+    await interaction.response.send_message(f"✅ تم تعيين العضو {member.mention} كنائب لصاحب البوت بنجاح عبر الأمر!", ephemeral=True)
 
 
-@bot.tree.command(name="protect", description="حماية رتبة معينة من التخريب أو السحب")
+@bot.tree.command(name="protect", description="حماية رتبة معينة من التخريب أو السحب عبر أمر البوت")
 @discord.app_commands.describe(role="اختر الرتبة المراد حمايتها")
 async def protect(interaction: discord.Interaction, role: discord.Role):
     if not await check_owner_or_deputy_perm(interaction):
@@ -297,7 +350,7 @@ async def protect(interaction: discord.Interaction, role: discord.Role):
         await interaction.response.send_message(f"⚠️ الرتبة **{role.name}** محمية مسبقاً.", ephemeral=True)
 
 
-@bot.tree.command(name="unjail", description="إخراج عضو من الحجر وإرجاع رتبه السابقة")
+@bot.tree.command(name="unjail", description="إخراج عضو من الحجر وإرجاع رتبه السابقة بأمر البوت")
 @discord.app_commands.describe(member="اختر العضو المراد إخراجه من الحجر")
 async def unjail(interaction: discord.Interaction, member: discord.Member):
     if not await check_owner_or_deputy_perm(interaction):
@@ -339,7 +392,7 @@ async def clear_messages(interaction: discord.Interaction, amount: int):
         await interaction.followup.send(f"❌ حدث خطأ أثناء محاولة حذف الرسائل: {e}", ephemeral=True)
 
 
-@bot.tree.command(name="اعلان", description="إنشاء روم إعلانات ونشر إعلان وتثبيته تلقائياً")
+@bot.tree.command(name="اعلان", description="إنشاء روم إعلانات ونشر إعلان وتثبيته تلقائياً عبر أمر البوت")
 @discord.app_commands.describe(text="اكتب نص الإعلان هنا")
 async def announce(interaction: discord.Interaction, text: str):
     if not await check_owner_or_deputy_perm(interaction):
@@ -362,7 +415,7 @@ async def announce(interaction: discord.Interaction, text: str):
     await interaction.response.send_message(f"✅ تم نشر الإعلان وتثبيته في روم {announcement_channel.mention} بنجاح!", ephemeral=True)
 
 
-@bot.tree.command(name="قول", description="إرسال رسالة من خلال البوت إلى أي روم نصي تحدده")
+@bot.tree.command(name="قول", description="إرسال رسالة من خلال البوت إلى أي روم نصي تحدده بأمر البوت")
 @discord.app_commands.describe(channel="اختر الروم", message="اكتب الرسالة المراد إرسالها")
 async def say_in_channel(interaction: discord.Interaction, channel: discord.TextChannel, message: str):
     if not await check_owner_or_deputy_perm(interaction):
@@ -372,7 +425,7 @@ async def say_in_channel(interaction: discord.Interaction, channel: discord.Text
     await interaction.response.send_message(f"✅ تم إرسال رسالتك بنجاح إلى الروم {channel.mention}", ephemeral=True)
 
 
-@bot.tree.command(name="خاص", description="إرسال رسالة خاصة (DM) لعضو معين من خلال البوت")
+@bot.tree.command(name="خاص", description="إرسال رسالة خاصة (DM) لعضو معين من خلال البوت بأمر البوت")
 @discord.app_commands.describe(member="اختر العضو", message="اكتب الرسالة الخاصة")
 async def send_dm(interaction: discord.Interaction, member: discord.Member, message: str):
     if not await check_owner_or_deputy_perm(interaction):
@@ -404,7 +457,6 @@ async def on_ready():
     await bot.tree.sync()
     print(f"Logged in as {bot.user.name} (ID: {bot.user.id})")
     
-    # الدخول التلقائي للروم الصوتي فور تشغيل البوت
     if VOICE_CHANNEL_ID != 0:
         for guild in bot.guilds:
             channel = guild.get_channel(VOICE_CHANNEL_ID)
