@@ -25,17 +25,15 @@ def check_owner_or_deputy(interaction: discord.Interaction):
         return True
     return False
 
-# ==================== 1. نظام الحماية (Anti-Nuke المحدث) ====================
+# ==================== 1. نظام الحماية (Anti-Nuke) ====================
 @bot.event
 async def on_member_update(before: discord.Member, after: discord.Member):
-    # تحقق إذا حصل نقصان في رتب العضو (احتمال سحب رتبة)
     if len(before.roles) > len(after.roles):
         removed_roles = set(before.roles) - set(after.roles)
         for role in removed_roles:
             if role.id in protected_roles_list:
                 guild = after.guild
                 
-                # البحث عن المهاجم (الذي قام بسحب الرتبة) من خلال سجل التدقيق (Audit Log)
                 attacker = None
                 try:
                     async for entry in guild.audit_logs(limit=5, action=discord.AuditLogAction.member_role_update):
@@ -45,20 +43,14 @@ async def on_member_update(before: discord.Member, after: discord.Member):
                 except:
                     pass
                 
-                # إرجاع الرتبة المحمية مباشرة للعضو الضحية (after)
                 try:
                     await after.add_roles(role)
                 except:
                     pass
 
-                # معاقبة المهاجم إذا تم رصده ولم يكن هو صاحب السيرفر أو البوت
                 if attacker and attacker.id != guild.owner_id and not attacker.bot:
                     jail_role = discord.utils.get(guild.roles, name="قوانين-الحجر")
                     if not jail_role:
-                        # إنشاء رتبة الحجر الصحي بمنع الصلاحيات تلقائياً إذا لم تكن موجودة
-                        overwrites = {
-                            guild.default_role: discord.PermissionOverwrite(view_channel=False),
-                        }
                         jail_role = await guild.create_role(name="قوانين-الحجر", color=discord.Color.dark_grey())
                         
                     jail_channel = discord.utils.get(guild.text_channels, name="quarantine-zone")
@@ -69,21 +61,19 @@ async def on_member_update(before: discord.Member, after: discord.Member):
                         }
                         jail_channel = await guild.create_text_channel("quarantine-zone", overwrites=overwrites)
                     else:
-                        await jail_channel.set_permissions(jail_role, view_channel=True, send_messages=True)
+                        await jail_channel.set_permissions(jail_role, view_channel=True, send_messages=True, read_message_history=True)
+                        await jail_channel.set_permissions(guild.default_role, view_channel=False)
 
-                    # حفظ رتب المهاجم السابقة (التي ليست رتبة الجميع أو رتبة الحجر)
                     saved_roles[attacker.id] = [r for r in attacker.roles if r != guild.default_role and r != jail_role]
 
                     try:
-                        # سحب جميع رتب المهاجم وإعطاؤه رتبة الحجر فقط
                         await attacker.edit(roles=[jail_role])
                     except:
                         pass
 
-                    # إرسال تنبيه في روم المراجعة للإدارة
                     admin_review = discord.utils.get(guild.text_channels, name="admin-review")
                     if admin_review:
-                        await admin_review.send(f"🚨 **تنبيه أمني صارم:** حاول العضو {attacker.mention} سحب رتبة محمية (`{role.name}`). تم سحب جميع رتبه، تحويله إلى الحجر الصحي، وإرجاع الرتبة المحمية فوراً!")
+                        await admin_review.send(f"🚨 **تنبيه أمني صارم:** حاول العضو {attacker.mention} سحب رتبة محمية (`{role.name}`). تم سحب جميع رتبه وتحويله إلى `quarantine-zone` وإرجاع الرتبة المحمية فوراً!")
                 break
 
 # ==================== 2. نظام التقديم ====================
@@ -215,17 +205,21 @@ async def setup(interaction: discord.Interaction):
         await guild.create_role(name="مسؤول-التذاكر", color=discord.Color.blue())
     if not discord.utils.get(guild.roles, name="مسؤول-التقديم"):
         await guild.create_role(name="مسؤول-التقديم", color=discord.Color.purple())
-    if not discord.utils.get(guild.roles, name="قوانين-الحجر"):
-        await guild.create_role(name="قوانين-الحجر", color=discord.Color.dark_grey())
+    
+    jail_role = discord.utils.get(guild.roles, name="قوانين-الحجر")
+    if not jail_role:
+        jail_role = await guild.create_role(name="قوانين-الحجر", color=discord.Color.dark_grey())
 
     jail_channel = discord.utils.get(guild.text_channels, name="quarantine-zone")
-    jail_role = discord.utils.get(guild.roles, name="قوانين-الحجر")
     if not jail_channel:
         overwrites = {
             guild.default_role: discord.PermissionOverwrite(view_channel=False),
             jail_role: discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True)
         }
         await guild.create_text_channel("quarantine-zone", overwrites=overwrites)
+    else:
+        await jail_channel.set_permissions(jail_role, view_channel=True, send_messages=True, read_message_history=True)
+        await jail_channel.set_permissions(guild.default_role, view_channel=False)
 
     admin_channel = discord.utils.get(guild.text_channels, name="admin-review")
     if not admin_channel:
@@ -322,6 +316,25 @@ async def unjail(interaction: discord.Interaction, member: discord.Member):
     await interaction.response.send_message(f"🔓 تم إخراج العضو {member.mention} من الحجر وإرجاع رتبه السابقة بنجاح.", ephemeral=True)
 
 
+@bot.tree.command(name="حذف", description="حذف عدد من الرسائل في الروم (الحد الأقصى 100 رسالة)")
+@discord.app_commands.describe(amount="عدد الرسائل المراد حذفها (من 1 إلى 100)")
+async def clear_messages(interaction: discord.Interaction, amount: int):
+    if not check_owner_or_deputy(interaction):
+        await interaction.response.send_message("❌ هذا الأمر مخصص لصاحب السيرفر أو النائب فقط!", ephemeral=True)
+        return
+
+    if amount < 1 or amount > 100:
+        await interaction.response.send_message("❌ عذراً، يجب أن يكون عدد الرسائل المراد حذفها بين **1 و 100** كحد أقصى.", ephemeral=True)
+        return
+
+    await interaction.response.defer(ephemeral=True)
+    try:
+        deleted = await interaction.channel.purge(limit=amount)
+        await interaction.followup.send(f"✅ تم بنجاح حذف **{len(deleted)}** رسالة من هذا الروم.", ephemeral=True)
+    except Exception as e:
+        await interaction.followup.send(f"❌ حدث خطأ أثناء محاولة حذف الرسائل: {e}", ephemeral=True)
+
+
 @bot.tree.command(name="اعلان", description="إنشاء روم إعلانات ونشر إعلان وتثبيته تلقائياً")
 @discord.app_commands.describe(text="اكتب نص الإعلان هنا")
 async def announce(interaction: discord.Interaction, text: str):
@@ -375,7 +388,7 @@ async def send_dm(interaction: discord.Interaction, member: discord.Member, mess
 async def on_ready():
     await bot.tree.sync()
     print(f"Logged in as {bot.user.name} (ID: {bot.user.id})")
-    print("Bot is ready, anti-nuke & all systems running smoothly!")
+    print("Bot is ready, clear command and all systems operational!")
 
 keep_alive()
 bot.run(os.getenv("DISCORD_TOKEN"))
