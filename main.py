@@ -235,7 +235,7 @@ class AdminDecisionView(View):
         accepted_role = discord.utils.get(guild.roles, name="مسؤول-التقديم")
         if (accepted_role and accepted_role in interaction.user.roles) or is_exempted(interaction.user):
             try:
-                await self.member.send("❌ نأسف لك، تم رفض طلب تقديمك للإدارة.")
+                await self.member.send("❌ نأسف لك، تم رفض طلب تقديمك من الإدارة.")
             except:
                 pass
             await interaction.message.edit(view=None)
