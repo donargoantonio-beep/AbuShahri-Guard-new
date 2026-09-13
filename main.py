@@ -17,6 +17,9 @@ saved_roles = {}
 protected_roles_list = []
 deputy_role_id = None
 
+# ضع آيدي الروم الصوتي الدائم هنا (مثال: 123456789012345678)
+VOICE_CHANNEL_ID = 0  
+
 # دالة التحقق: المالك أو النائب المعين فقط
 def check_owner_or_deputy(interaction: discord.Interaction):
     if interaction.user.id == interaction.guild.owner_id:
@@ -190,7 +193,7 @@ class TicketButtonView(View):
         await interaction.response.send_message(f"✅ تم فتح تذكرتك بنجاح: {ticket_channel.mention}", ephemeral=True)
 
 
-# ==================== 4. أوامر الـ Slash Commands المنفصلة ====================
+# ==================== 4. أوامر الـ Slash Commands ====================
 
 @bot.tree.command(name="setup", description="إعداد رومات النظام الأساسية والتذاكر والتقديم تلقائياً")
 async def setup(interaction: discord.Interaction):
@@ -229,7 +232,6 @@ async def setup(interaction: discord.Interaction):
         }
         await guild.create_text_channel("admin-review", overwrites=overwrites)
 
-    # روم الدعم الفني وتذاكر
     ticket_panel = discord.utils.get(guild.text_channels, name="الدعم-الفني🎫")
     if not ticket_panel:
         ticket_panel = await guild.create_text_channel("الدعم-الفني🎫")
@@ -237,7 +239,6 @@ async def setup(interaction: discord.Interaction):
     embed_ticket = discord.Embed(title="مركز الدعم والتذاكر", description="اضغط على الزر أدناه لفتح تذكرة خاصة للتواصل مع الإدارة.", color=discord.Color.green())
     await ticket_panel.send(embed=embed_ticket, view=TicketButtonView())
 
-    # روم تقديم الإدارة
     apply_panel = discord.utils.get(guild.text_channels, name="التقديم-للسيرفر")
     if not apply_panel:
         apply_panel = await guild.create_text_channel("التقديم-للسيرفر")
@@ -248,7 +249,7 @@ async def setup(interaction: discord.Interaction):
     await interaction.followup.send("✅ تم إعداد رومات النظام والتذاكر والتقديم بنجاح!", ephemeral=True)
 
 
-@bot.tree.command(name="voice", description="تحديد روم صوتي موجود مسبقاً ليتواجد فيه البوت (AFK) 24 ساعة")
+@bot.tree.command(name="voice", description="تحديد روم صوتي دائم للبوت يدخله تلقائياً")
 @discord.app_commands.describe(voice_channel="اختر الروم الصوتي من سيرفرك")
 async def voice_command(interaction: discord.Interaction, voice_channel: discord.VoiceChannel):
     if not check_owner_or_deputy(interaction):
@@ -257,12 +258,14 @@ async def voice_command(interaction: discord.Interaction, voice_channel: discord
 
     await interaction.response.defer(ephemeral=True)
     try:
+        global VOICE_CHANNEL_ID
+        VOICE_CHANNEL_ID = voice_channel.id
         if interaction.guild.me.voice:
             await interaction.guild.me.voice.channel.disconnect()
         await voice_channel.connect()
-        await interaction.followup.send(f"✅ تم انضمام البوت بنجاح إلى الروم الصوتي: **{voice_channel.name}**", ephemeral=True)
+        await interaction.followup.send(f"✅ تم ربط البوت بالروم **{voice_channel.name}** ودخوله بنجاح بشكل دائم!", ephemeral=True)
     except Exception as e:
-        await interaction.followup.send(f"❌ حدث خطأ أثناء محاولة الاتصال بالروم: {e}", ephemeral=True)
+        await interaction.followup.send(f"❌ حدث خطأ أثناء الاتصال بالروم: {e}", ephemeral=True)
 
 
 @bot.tree.command(name="setrole", description="تعيين رتبة النائب للتحكم بالبوت")
@@ -388,7 +391,17 @@ async def send_dm(interaction: discord.Interaction, member: discord.Member, mess
 async def on_ready():
     await bot.tree.sync()
     print(f"Logged in as {bot.user.name} (ID: {bot.user.id})")
-    print("Bot is ready, clear command and all systems operational!")
+    
+    # الدخول التلقائي للروم الصوتي فور تشغيل البوت
+    if VOICE_CHANNEL_ID != 0:
+        for guild in bot.guilds:
+            channel = guild.get_channel(VOICE_CHANNEL_ID)
+            if channel and isinstance(channel, discord.VoiceChannel):
+                try:
+                    await channel.connect()
+                    print(f"Connected automatically to voice channel: {channel.name} in {guild.name}")
+                except Exception as e:
+                    print(f"Failed to auto-connect to voice channel: {e}")
 
 keep_alive()
 bot.run(os.getenv("DISCORD_TOKEN"))
