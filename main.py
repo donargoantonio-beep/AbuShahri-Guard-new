@@ -308,7 +308,7 @@ async def setup(interaction: discord.Interaction):
     await interaction.followup.send("✅ تم إعداد رومات النظام والتذاكر والتقديم بنجاح!", ephemeral=True)
 
 
-@bot.tree.command(name="روم_صوتي", description="تحديد روم صوتي دائم يدخله البوت تلقائياً")
+@bot.tree.command(name="روم_صوتي", description="تحديد روم صوتي دائم يدخله البوت تلقائياً ويعود إليه إذا خرج")
 @discord.app_commands.describe(voice_channel="اختر الروم الصوتي من السيرفر")
 async def voice_command(interaction: discord.Interaction, voice_channel: discord.VoiceChannel):
     if not await check_owner_or_deputy_perm(interaction):
@@ -321,9 +321,31 @@ async def voice_command(interaction: discord.Interaction, voice_channel: discord
         if interaction.guild.me.voice:
             await interaction.guild.me.voice.channel.disconnect()
         await voice_channel.connect()
-        await interaction.followup.send(f"✅ تم ربط البوت بالروم الصوتي **{voice_channel.name}** والدخول إليه بنجاح!", ephemeral=True)
+        await interaction.followup.send(f"✅ تم ربط البوت بالروم الصوتي **{voice_channel.name}** ودخوله بنجاح (سيعود إليه تلقائياً دائماً)!", ephemeral=True)
     except Exception as e:
         await interaction.followup.send(f"❌ حدث خطأ أثناء الاتصال بالروم: {e}", ephemeral=True)
+
+
+# مراقب أحداث الصوت: إذا خرج البوت أو أُخرج من الروم المحدد، سيعود إليه فوراً
+@bot.event
+async def on_voice_state_update(member: discord.Member, before: discord.VoiceState, after: discord.VoiceState):
+    global VOICE_CHANNEL_ID
+    if VOICE_CHANNEL_ID == 0:
+        return
+
+    # التحقق مما إذا كان العضو الذي تغيرت حالته هو البوت نفسه
+    if member.id == bot.user.id:
+        # إذا كان البوت غير متصل حالياً بأي روم أو خرج من الروم المحدد
+        if before.channel and before.channel.id == VOICE_CHANNEL_ID and after.channel is None:
+            await asyncio.sleep(1) # مهلة قصيرة لتجنب أي تعارض
+            guild = member.guild
+            channel = guild.get_channel(VOICE_CHANNEL_ID)
+            if channel and isinstance(channel, discord.VoiceChannel):
+                try:
+                    await channel.connect()
+                    print(f"🔄 تم إعادة ربط البوت تلقائياً بالروم الصوتي: {channel.name}")
+                except Exception as e:
+                    print(f"فشل إعادة الاتصال بالروم الصوتي تلقائياً: {e}")
 
 
 @bot.tree.command(name="تعيين_نائب", description="[لمالك البوت فقط] تعيين عضو كنائب للبوت (يمكنك تعيين أكثر من نائب)")
