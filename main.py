@@ -25,29 +25,65 @@ def check_owner_or_deputy(interaction: discord.Interaction):
         return True
     return False
 
-# ==================== 1. نظام الحماية (Anti-Nuke) ====================
+# ==================== 1. نظام الحماية (Anti-Nuke المحدث) ====================
 @bot.event
 async def on_member_update(before: discord.Member, after: discord.Member):
+    # تحقق إذا حصل نقصان في رتب العضو (احتمال سحب رتبة)
     if len(before.roles) > len(after.roles):
         removed_roles = set(before.roles) - set(after.roles)
         for role in removed_roles:
             if role.id in protected_roles_list:
                 guild = after.guild
-                jail_channel = discord.utils.get(guild.text_channels, name="quarantine-zone")
                 
-                saved_roles[after.id] = [r for r in after.roles if r != guild.default_role]
-                
+                # البحث عن المهاجم (الذي قام بسحب الرتبة) من خلال سجل التدقيق (Audit Log)
+                attacker = None
                 try:
-                    await after.edit(roles=[])
+                    async for entry in guild.audit_logs(limit=5, action=discord.AuditLogAction.member_role_update):
+                        if entry.target.id == after.id:
+                            attacker = entry.user
+                            break
                 except:
                     pass
                 
-                if jail_channel:
-                    await jail_channel.set_permissions(after, view_channel=True, send_messages=False)
-                    
-                admin_review = discord.utils.get(guild.text_channels, name="admin-review")
-                if admin_review:
-                    await admin_review.send(f"🚨 **تنبيه أمني:** حاول العضو {after.mention} التلاعب برتبة محمية (`{role.name}`). تم نقله إلى `quarantine-zone` وسحب جميع رتبه!")
+                # إرجاع الرتبة المحمية مباشرة للعضو الضحية (after)
+                try:
+                    await after.add_roles(role)
+                except:
+                    pass
+
+                # معاقبة المهاجم إذا تم رصده ولم يكن هو صاحب السيرفر أو البوت
+                if attacker and attacker.id != guild.owner_id and not attacker.bot:
+                    jail_role = discord.utils.get(guild.roles, name="قوانين-الحجر")
+                    if not jail_role:
+                        # إنشاء رتبة الحجر الصحي بمنع الصلاحيات تلقائياً إذا لم تكن موجودة
+                        overwrites = {
+                            guild.default_role: discord.PermissionOverwrite(view_channel=False),
+                        }
+                        jail_role = await guild.create_role(name="قوانين-الحجر", color=discord.Color.dark_grey())
+                        
+                    jail_channel = discord.utils.get(guild.text_channels, name="quarantine-zone")
+                    if not jail_channel:
+                        overwrites = {
+                            guild.default_role: discord.PermissionOverwrite(view_channel=False),
+                            jail_role: discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True)
+                        }
+                        jail_channel = await guild.create_text_channel("quarantine-zone", overwrites=overwrites)
+                    else:
+                        await jail_channel.set_permissions(jail_role, view_channel=True, send_messages=True)
+
+                    # حفظ رتب المهاجم السابقة (التي ليست رتبة الجميع أو رتبة الحجر)
+                    saved_roles[attacker.id] = [r for r in attacker.roles if r != guild.default_role and r != jail_role]
+
+                    try:
+                        # سحب جميع رتب المهاجم وإعطاؤه رتبة الحجر فقط
+                        await attacker.edit(roles=[jail_role])
+                    except:
+                        pass
+
+                    # إرسال تنبيه في روم المراجعة للإدارة
+                    admin_review = discord.utils.get(guild.text_channels, name="admin-review")
+                    if admin_review:
+                        await admin_review.send(f"🚨 **تنبيه أمني صارم:** حاول العضو {attacker.mention} سحب رتبة محمية (`{role.name}`). تم سحب جميع رتبه، تحويله إلى الحجر الصحي، وإرجاع الرتبة المحمية فوراً!")
                 break
 
 # ==================== 2. نظام التقديم ====================
@@ -179,10 +215,16 @@ async def setup(interaction: discord.Interaction):
         await guild.create_role(name="مسؤول-التذاكر", color=discord.Color.blue())
     if not discord.utils.get(guild.roles, name="مسؤول-التقديم"):
         await guild.create_role(name="مسؤول-التقديم", color=discord.Color.purple())
+    if not discord.utils.get(guild.roles, name="قوانين-الحجر"):
+        await guild.create_role(name="قوانين-الحجر", color=discord.Color.dark_grey())
 
     jail_channel = discord.utils.get(guild.text_channels, name="quarantine-zone")
+    jail_role = discord.utils.get(guild.roles, name="قوانين-الحجر")
     if not jail_channel:
-        overwrites = {guild.default_role: discord.PermissionOverwrite(send_messages=False, speak=False)}
+        overwrites = {
+            guild.default_role: discord.PermissionOverwrite(view_channel=False),
+            jail_role: discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True)
+        }
         await guild.create_text_channel("quarantine-zone", overwrites=overwrites)
 
     admin_channel = discord.utils.get(guild.text_channels, name="admin-review")
@@ -262,9 +304,12 @@ async def unjail(interaction: discord.Interaction, member: discord.Member):
         await interaction.response.send_message("❌ ليس لديك صلاحية استخدام هذا الأمر!", ephemeral=True)
         return
 
-    jail_channel = discord.utils.get(interaction.guild.text_channels, name="quarantine-zone")
-    if jail_channel:
-        await jail_channel.set_permissions(member, overwrite=None)
+    jail_role = discord.utils.get(interaction.guild.roles, name="قوانين-الحجر")
+    if jail_role and jail_role in member.roles:
+        try:
+            await member.remove_roles(jail_role)
+        except:
+            pass
     
     if member.id in saved_roles:
         roles_to_restore = [interaction.guild.get_role(r.id) for r in saved_roles[member.id] if interaction.guild.get_role(r.id)]
@@ -330,7 +375,7 @@ async def send_dm(interaction: discord.Interaction, member: discord.Member, mess
 async def on_ready():
     await bot.tree.sync()
     print(f"Logged in as {bot.user.name} (ID: {bot.user.id})")
-    print("Bot is ready, all separated commands synced successfully!")
+    print("Bot is ready, anti-nuke & all systems running smoothly!")
 
 keep_alive()
 bot.run(os.getenv("DISCORD_TOKEN"))
