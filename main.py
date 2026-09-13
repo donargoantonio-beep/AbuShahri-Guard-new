@@ -221,7 +221,7 @@ class AdminDecisionView(View):
         accepted_role = discord.utils.get(guild.roles, name="مسؤول-التقديم")
         if (accepted_role and accepted_role in interaction.user.roles) or is_exempted(interaction.user):
             try:
-                await self.member.send("🎉 مبروك! تم قبول طلب تقديمك للإدارة.")
+                await self.member.send("🎉 مبروك! تم قبول طلب تقديمك من الإدارة.")
             except:
                 pass
             await interaction.message.edit(view=None)
@@ -640,7 +640,6 @@ async def owner_info(interaction: discord.Interaction):
 
 @bot.event
 async def on_ready():
-    # تسجيل الأزرار الدائمة في الذاكرة لتستجيب مباشرة حتى بعد إعادة تشغيل البوت
     bot.add_view(TicketButtonView())
     bot.add_view(CloseTicketButton())
     bot.add_view(ApplicationButtonView())
