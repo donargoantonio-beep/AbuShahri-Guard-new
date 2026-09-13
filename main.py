@@ -164,24 +164,16 @@ class TicketButtonView(View):
         await interaction.response.send_message(f"✅ تم فتح تذكرتك بنجاح: {ticket_channel.mention}", ephemeral=True)
 
 
-# ==================== 4. أوامر الـ Slash Commands ====================
+# ==================== 4. أوامر الـ Slash Commands المنفصلة ====================
 
-@bot.tree.command(name="setup", description="إعداد الرومات والتذاكر والتقديم وتحديد الروم الصوتي للبوت")
-@discord.app_commands.describe(
-    voice_channel="اختر الروم الصوتي الموجود أساساً عندك ليدخل فيه البوت 24 ساعة",
-    deputy_role="اختر رتبة النائب"
-)
-async def setup(interaction: discord.Interaction, voice_channel: discord.VoiceChannel, deputy_role: discord.Role = None):
+@bot.tree.command(name="setup", description="إعداد رومات النظام الأساسية والتذاكر والتقديم تلقائياً")
+async def setup(interaction: discord.Interaction):
     if not check_owner_or_deputy(interaction):
         await interaction.response.send_message("❌ هذا الأمر مخصص لصاحب السيرفر أو النائب فقط!", ephemeral=True)
         return
 
     await interaction.response.defer(ephemeral=True)
     guild = interaction.guild
-
-    global deputy_role_id
-    if deputy_role:
-        deputy_role_id = deputy_role.id
 
     if not discord.utils.get(guild.roles, name="مسؤول-التذاكر"):
         await guild.create_role(name="مسؤول-التذاكر", color=discord.Color.blue())
@@ -201,28 +193,40 @@ async def setup(interaction: discord.Interaction, voice_channel: discord.VoiceCh
         }
         await guild.create_text_channel("admin-review", overwrites=overwrites)
 
-    try:
-        if interaction.guild.me.voice:
-            await interaction.guild.me.voice.channel.disconnect()
-        await voice_channel.connect()
-    except Exception as e:
-        print(f"Could not connect to voice channel: {e}")
-
-    ticket_panel = discord.utils.get(guild.text_channels, name="روم-التذاكر")
+    # روم الدعم الفني وتذاكر
+    ticket_panel = discord.utils.get(guild.text_channels, name="الدعم-الفني🎫")
     if not ticket_panel:
-        ticket_panel = await guild.create_text_channel("روم-التذاكر")
+        ticket_panel = await guild.create_text_channel("الدعم-الفني🎫")
     
     embed_ticket = discord.Embed(title="مركز الدعم والتذاكر", description="اضغط على الزر أدناه لفتح تذكرة خاصة للتواصل مع الإدارة.", color=discord.Color.green())
     await ticket_panel.send(embed=embed_ticket, view=TicketButtonView())
 
-    apply_panel = discord.utils.get(guild.text_channels, name="تقديم-الإدارة")
+    # روم تقديم الإدارة
+    apply_panel = discord.utils.get(guild.text_channels, name="التقديم-للسيرفر")
     if not apply_panel:
-        apply_panel = await guild.create_text_channel("تقديم-الإدارة")
+        apply_panel = await guild.create_text_channel("التقديم-للسيرفر")
         
     embed_apply = discord.Embed(title="التقديم لفريق الإدارة", description="اضغط على الزر أدناه لتعبئة استبيان التقديم.", color=discord.Color.purple())
     await apply_panel.send(embed=embed_apply, view=ApplicationButtonView())
 
-    await interaction.followup.send(f"✅ تم الإعداد بنجاح! والبوت متواجد الآن في الروم الصوتي: **{voice_channel.name}**", ephemeral=True)
+    await interaction.followup.send("✅ تم إعداد رومات النظام والتذاكر والتقديم بنجاح!", ephemeral=True)
+
+
+@bot.tree.command(name="voice", description="تحديد روم صوتي موجود مسبقاً ليتواجد فيه البوت (AFK) 24 ساعة")
+@discord.app_commands.describe(voice_channel="اختر الروم الصوتي من سيرفرك")
+async def voice_command(interaction: discord.Interaction, voice_channel: discord.VoiceChannel):
+    if not check_owner_or_deputy(interaction):
+        await interaction.response.send_message("❌ هذا الأمر مخصص لصاحب السيرفر أو النائب فقط!", ephemeral=True)
+        return
+
+    await interaction.response.defer(ephemeral=True)
+    try:
+        if interaction.guild.me.voice:
+            await interaction.guild.me.voice.channel.disconnect()
+        await voice_channel.connect()
+        await interaction.followup.send(f"✅ تم انضمام البوت بنجاح إلى الروم الصوتي: **{voice_channel.name}**", ephemeral=True)
+    except Exception as e:
+        await interaction.followup.send(f"❌ حدث خطأ أثناء محاولة الاتصال بالروم: {e}", ephemeral=True)
 
 
 @bot.tree.command(name="setrole", description="تعيين رتبة النائب للتحكم بالبوت")
@@ -326,7 +330,7 @@ async def send_dm(interaction: discord.Interaction, member: discord.Member, mess
 async def on_ready():
     await bot.tree.sync()
     print(f"Logged in as {bot.user.name} (ID: {bot.user.id})")
-    print("Bot is ready, all slash commands synced successfully!")
+    print("Bot is ready, all separated commands synced successfully!")
 
 keep_alive()
 bot.run(os.getenv("DISCORD_TOKEN"))
