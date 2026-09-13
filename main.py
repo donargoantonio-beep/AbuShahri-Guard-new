@@ -14,8 +14,8 @@ intents.voice_states = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 
 saved_roles = {}
-protected_roles_list = []      # الرتب المراد حمايتها نفسها (من السحب)
-exempted_roles_list = []       # الرتب التي يتمتع أصحابها بالحماية (لا يتم معاقبتهم)
+protected_users_list = []      # قائمة آيديات الأشخاص المحميين فردياً
+protected_roles_list = []      # قائمة آيديات الرتب المحمية
 deputy_user_ids = []           # قائمة النواب
 
 # ==================== إعدادات مالك البوت ====================
@@ -39,66 +39,19 @@ async def check_owner_or_deputy_perm(interaction: discord.Interaction):
     )
     return False
 
-# دالة التحقق مما إذا كان العضو معفياً (شخص محمي أو مالك أو نائب)
+# دالة التحقق مما إذا كان العضو معفياً (شخص محمي فردياً، أو لديه رتبة محمية، أو مالك، أو نائب)
 def is_exempted(member: discord.Member):
     if member.id == BOT_OWNER_ID or member.id in deputy_user_ids or member.id == member.guild.owner_id:
         return True
+    if member.id in protected_users_list:
+        return True
+    # التحقق مما إذا كان العضو يمتلك إحدى الرتب المحمية
     for role in member.roles:
-        if role.id in exempted_roles_list:
+        if role.id in protected_roles_list:
             return True
     return False
 
 # ==================== نظام الحماية الشامل (النيوك ورومات الحذف) ====================
-
-@bot.event
-async def on_member_update(before: discord.Member, after: discord.Member):
-    if len(before.roles) > len(after.roles):
-        removed_roles = set(before.roles) - set(after.roles)
-        for role in removed_roles:
-            if role.id in protected_roles_list:
-                guild = after.guild
-                
-                attacker = None
-                try:
-                    async for entry in guild.audit_logs(limit=5, action=discord.AuditLogAction.member_role_update):
-                        if entry.target.id == after.id:
-                            attacker = entry.user
-                            break
-                except:
-                    pass
-                
-                try:
-                    await after.add_roles(role)
-                except:
-                    pass
-
-                if attacker and not is_exempted(attacker) and not attacker.bot:
-                    jail_role = discord.utils.get(guild.roles, name="قوانين-الحجر")
-                    if not jail_role:
-                        jail_role = await guild.create_role(name="قوانين-الحجر", color=discord.Color.dark_grey())
-                        
-                    jail_channel = discord.utils.get(guild.text_channels, name="quarantine-zone")
-                    if not jail_channel:
-                        overwrites = {
-                            guild.default_role: discord.PermissionOverwrite(view_channel=False),
-                            jail_role: discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True)
-                        }
-                        jail_channel = await guild.create_text_channel("quarantine-zone", overwrites=overwrites)
-                    else:
-                        await jail_channel.set_permissions(jail_role, view_channel=True, send_messages=True, read_message_history=True)
-                        await jail_channel.set_permissions(guild.default_role, view_channel=False)
-
-                    saved_roles[attacker.id] = [r for r in attacker.roles if r != guild.default_role and r != jail_role]
-
-                    try:
-                        await attacker.edit(roles=[jail_role])
-                    except:
-                        pass
-
-                    admin_review = discord.utils.get(guild.text_channels, name="admin-review")
-                    if admin_review:
-                        await admin_review.send(f"🚨 **تنبيه أمني صارم:** حاول العضو غير المحمي {attacker.mention} سحب رتبة (`{role.name}`). تم سحب جميع رتبه وتحويله إلى منطقة الحجر وإعادة الرتبة فوراً!")
-                break
 
 @bot.event
 async def on_guild_channel_delete(channel: discord.abc.GuildChannel):
@@ -112,7 +65,7 @@ async def on_guild_channel_delete(channel: discord.abc.GuildChannel):
     except:
         pass
 
-    # إذا كان الحذف من قبل شخص محمي (أو مالك أو نائب)، فلن يتم معاقبته ولن يعيد البوت إنشاء الروم
+    # إذا كان الحذف من قبل شخص محمي (أو صاحب رتبة محمية، أو مالك، أو نائب)، فلن يتم معاقبته ولن يعيد البوت إنشاء الروم
     if attacker and is_exempted(attacker):
         return
 
@@ -414,30 +367,108 @@ async def shownawwab(interaction: discord.Interaction):
     await interaction.response.send_message(embed=embed, ephemeral=True)
 
 
-@bot.tree.command(name="حماية_رتبة_الأشخاص", description="جعل حاملي رتبة معينين أشخاصاً محميين (لا يعاقبهم البوت عند حذف رومات أو غيره)")
-@discord.app_commands.describe(role="اختر الرتبة التي تريد جعل أصحابها محميين")
-async def protect_people_role(interaction: discord.Interaction, role: discord.Role):
+# ==================== أوامر حماية الأشخاص والرتب ====================
+
+@bot.tree.command(name="حماية_شخص", description="إضافة شخص معين إلى قائمة المحميين فردياً")
+@discord.app_commands.describe(member="اختر العضو المراد حمايته")
+async def protect_person(interaction: discord.Interaction, member: discord.Member):
     if not await check_owner_or_deputy_perm(interaction):
         return
 
-    if role.id not in exempted_roles_list:
-        exempted_roles_list.append(role.id)
-        await interaction.response.send_message(f"🛡️ تمت إضافة رتبة **{role.name}** إلى قائمة الرتب المحمية للأشخاص (أصحاب هذه الرتبة أصبحوا محميين ولن يعاقبهم البوت)!", ephemeral=True)
+    global protected_users_list
+    if member.id not in protected_users_list:
+        protected_users_list.append(member.id)
+        await interaction.response.send_message(f"🛡️ تمت إضافة العضو {member.mention} إلى قائمة الأشخاص المحميين بنجاح!", ephemeral=True)
     else:
-        await interaction.response.send_message(f"⚠️ رتبة **{role.name}** مضافة مسبقاً لقائمة الحماية.", ephemeral=True)
+        await interaction.response.send_message(f"⚠️ العضو {member.mention} محمي مسبقاً.", ephemeral=True)
 
 
-@bot.tree.command(name="إزالة_حماية_رتبة_الأشخاص", description="إلغاء حماية الأشخاص عن رتبة معينة")
-@discord.app_commands.describe(role="اختر الرتبة المراد إزالة الحماية عنها")
-async def unprotect_people_role(interaction: discord.Interaction, role: discord.Role):
+@bot.tree.command(name="إزالة_حماية_شخص", description="إزالة حماية شخص معين")
+@discord.app_commands.describe(member="اختر العضو المراد إزالة الحماية عنه")
+async def unprotect_person(interaction: discord.Interaction, member: discord.Member):
     if not await check_owner_or_deputy_perm(interaction):
         return
 
-    if role.id in exempted_roles_list:
-        exempted_roles_list.remove(role.id)
-        await interaction.response.send_message(f"🔓 تمت إزالة رتبة **{role.name}** من حماية الأشخاص بنجاح.", ephemeral=True)
+    global protected_users_list
+    if member.id in protected_users_list:
+        protected_users_list.remove(member.id)
+        await interaction.response.send_message(f"🔓 تمت إزالة الحماية عن العضو {member.mention} بنجاح.", ephemeral=True)
     else:
-        await interaction.response.send_message(f"❌ رتبة **{role.name}** ليست مسجلة في حماية الأشخاص أساساً.", ephemeral=True)
+        await interaction.response.send_message(f"❌ العضو {member.mention} ليس موجوداً في قائمة الأشخاص المحميين أساساً.", ephemeral=True)
+
+
+@bot.tree.command(name="المحميين", description="عرض قائمة الأشخاص المحميين فردياً حالياً")
+async def shownprotectedpeople(interaction: discord.Interaction):
+    global protected_users_list
+    if not protected_users_list:
+        await interaction.response.send_message("ℹ️ لا يوجد أي أشخاص محميين بشكل فردي حالياً.", ephemeral=True)
+        return
+
+    users_list = []
+    for uid in protected_users_list:
+        m = interaction.guild.get_member(uid)
+        if m:
+            users_list.append(f"• {m.mention} (`{m.name}`)")
+        else:
+            users_list.append(f"• `ID: {uid}` (غير موجود بالسيرفر)")
+
+    embed = discord.Embed(
+        title=f"🛡️ قائمة الأشخاص المحميين ({len(protected_users_list)})",
+        description="\n".join(users_list),
+        color=discord.Color.green()
+    )
+    await interaction.response.send_message(embed=embed, ephemeral=True)
+
+
+@bot.tree.command(name="حماية_رتبه", description="إضافة رتبه إلى قائمة الرتب المحمية")
+@discord.app_commands.describe(role="اختر الرتبه المراد حمايتها")
+async def protect_role(interaction: discord.Interaction, role: discord.Role):
+    if not await check_owner_or_deputy_perm(interaction):
+        return
+
+    global protected_roles_list
+    if role.id not in protected_roles_list:
+        protected_roles_list.append(role.id)
+        await interaction.response.send_message(f"🛡️ تمت إضافة الرتبه {role.mention} إلى قائمة الرتب المحمية بنجاح!", ephemeral=True)
+    else:
+        await interaction.response.send_message(f"⚠️ الرتبه {role.mention} محمية مسبقاً.", ephemeral=True)
+
+
+@bot.tree.command(name="إزالة_حماية_رتبه", description="إزالة رتبه من قائمة الرتب المحمية")
+@discord.app_commands.describe(role="اختر الرتبه المراد إزالة الحماية عنها")
+async def unprotect_role(interaction: discord.Interaction, role: discord.Role):
+    if not await check_owner_or_deputy_perm(interaction):
+        return
+
+    global protected_roles_list
+    if role.id in protected_roles_list:
+        protected_roles_list.remove(role.id)
+        await interaction.response.send_message(f"🔓 تمت إزالة الحماية عن الرتبه {role.mention} بنجاح.", ephemeral=True)
+    else:
+        await interaction.response.send_message(f"❌ الرتبه {role.mention} ليست موجودة في قائمة الرتب المحمية أساساً.", ephemeral=True)
+
+
+@bot.tree.command(name="الرتب_المحميه", description="عرض قائمة الرتب المحمية حالياً")
+async def shownprotectedroles(interaction: discord.Interaction):
+    global protected_roles_list
+    if not protected_roles_list:
+        await interaction.response.send_message("ℹ️ لا توجد أي رتب محمية حالياً.", ephemeral=True)
+        return
+
+    roles_list = []
+    for rid in protected_roles_list:
+        r = interaction.guild.get_role(rid)
+        if r:
+            roles_list.append(f"• {r.mention} (`{r.name}`)")
+        else:
+            roles_list.append(f"• `ID: {rid}` (رتبه غير موجودة بالسيرفر)")
+
+    embed = discord.Embed(
+        title=f"🛡️ قائمة الرتب المحمية ({len(protected_roles_list)})",
+        description="\n".join(roles_list),
+        color=discord.Color.blue()
+    )
+    await interaction.response.send_message(embed=embed, ephemeral=True)
 
 
 @bot.tree.command(name="فك_الحجر", description="إخراج عضو من الحجر وإعادة رتبه السابقة")
