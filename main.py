@@ -178,7 +178,7 @@ async def on_member_ban(guild: discord.Guild, user: discord.User):
         await channel.send(embed=embed)
 
 
-# ==================== الأجزاء التفاعلية والأوامر ====================
+# ==================== الأجزاء التفاعلية والأزرار الدائمة ====================
 
 class ApplicationModal(Modal, title="نموذج التقديم للإدارة"):
     q1 = TextInput(label="الاسم", placeholder="اكتب اسمك هنا...", required=True)
@@ -206,7 +206,7 @@ class ApplicationButtonView(View):
     def __init__(self):
         super().__init__(timeout=None)
 
-    @discord.ui.button(label="تقديم على الإدارة", style=discord.ButtonStyle.green, custom_id="apply_button")
+    @discord.ui.button(label="تقديم على الإدارة", style=discord.ButtonStyle.green, custom_id="apply_button_permanent_1")
     async def apply_button(self, interaction: discord.Interaction, button: Button):
         await interaction.response.send_modal(ApplicationModal())
 
@@ -215,7 +215,7 @@ class AdminDecisionView(View):
         super().__init__(timeout=None)
         self.member = member
 
-    @discord.ui.button(label="قبول", style=discord.ButtonStyle.blurple, custom_id="accept_app")
+    @discord.ui.button(label="قبول", style=discord.ButtonStyle.blurple, custom_id="accept_app_btn")
     async def accept_app(self, interaction: discord.Interaction, button: Button):
         guild = interaction.guild
         accepted_role = discord.utils.get(guild.roles, name="مسؤول-التقديم")
@@ -229,7 +229,7 @@ class AdminDecisionView(View):
         else:
             await interaction.response.send_message("❌ عذراً، الصلاحية غير متاحة لك.", ephemeral=True)
 
-    @discord.ui.button(label="رفض", style=discord.ButtonStyle.red, custom_id="reject_app")
+    @discord.ui.button(label="رفض", style=discord.ButtonStyle.red, custom_id="reject_app_btn")
     async def reject_app(self, interaction: discord.Interaction, button: Button):
         guild = interaction.guild
         accepted_role = discord.utils.get(guild.roles, name="مسؤول-التقديم")
@@ -247,7 +247,7 @@ class CloseTicketButton(View):
     def __init__(self):
         super().__init__(timeout=None)
 
-    @discord.ui.button(label="إغلاق التذكرة 🔒", style=discord.ButtonStyle.red, custom_id="close_ticket")
+    @discord.ui.button(label="إغلاق التذكرة 🔒", style=discord.ButtonStyle.red, custom_id="close_ticket_btn_permanent")
     async def close_ticket(self, interaction: discord.Interaction, button: Button):
         guild = interaction.guild
         ticket_role = discord.utils.get(guild.roles, name="مسؤول-التذاكر")
@@ -262,14 +262,14 @@ class TicketButtonView(View):
     def __init__(self):
         super().__init__(timeout=None)
 
-    @discord.ui.button(label="فتح تذكرة 🎫", style=discord.ButtonStyle.primary, custom_id="open_ticket")
+    @discord.ui.button(label="فتح تذكرة 🎫", style=discord.ButtonStyle.primary, custom_id="open_ticket_btn_permanent_1")
     async def open_ticket(self, interaction: discord.Interaction, button: Button):
         guild = interaction.guild
         category = discord.utils.get(guild.categories, name="التذاكر")
         if not category:
             category = await guild.create_category("التذاكر")
 
-        channel_name = f"ticket-{interaction.user.name}"
+        channel_name = f"ticket-{interaction.user.name.lower()}"
         existing_channel = discord.utils.get(category.text_channels, name=channel_name)
         if existing_channel:
             await interaction.response.send_message(f"❌ لديك تذكرة مفتوحة بالفعل: {existing_channel.mention}", ephemeral=True)
@@ -640,6 +640,11 @@ async def owner_info(interaction: discord.Interaction):
 
 @bot.event
 async def on_ready():
+    # تسجيل الأزرار الدائمة في الذاكرة لتستجيب مباشرة حتى بعد إعادة تشغيل البوت
+    bot.add_view(TicketButtonView())
+    bot.add_view(CloseTicketButton())
+    bot.add_view(ApplicationButtonView())
+
     await bot.tree.sync()
     print(f"Logged in as {bot.user.name} (ID: {bot.user.id})")
     
