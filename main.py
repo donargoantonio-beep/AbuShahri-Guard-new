@@ -20,12 +20,18 @@ deputy_role_id = None
 # ضع آيدي الروم الصوتي الدائم هنا (مثال: 123456789012345678)
 VOICE_CHANNEL_ID = 0  
 
-# دالة التحقق: المالك أو النائب المعين فقط
-def check_owner_or_deputy(interaction: discord.Interaction):
+# دالة التحقق: المالك أو النائب المعين فقط (مع إرسال رسالة تنبيه مخصصة عند الرفض)
+async def check_owner_or_deputy_perm(interaction: discord.Interaction):
     if interaction.user.id == interaction.guild.owner_id:
         return True
     if deputy_role_id and any(r.id == deputy_role_id for r in interaction.user.roles):
         return True
+    
+    # رسالة الرفض المخصصة عند محاولة الاستخدام بدون صلاحية
+    await interaction.response.send_message(
+        "❌ عذراً، هذه الصلاحيات مخصصة للمالك فقط، وللحصول عليها يرجى التواصل مع مالك البوت: **`ii.ih`**", 
+        ephemeral=True
+    )
     return False
 
 # ==================== 1. نظام الحماية (Anti-Nuke) ====================
@@ -119,7 +125,7 @@ class AdminDecisionView(View):
     async def accept_app(self, interaction: discord.Interaction, button: Button):
         guild = interaction.guild
         accepted_role = discord.utils.get(guild.roles, name="مسؤول-التقديم")
-        if (accepted_role and accepted_role in interaction.user.roles) or check_owner_or_deputy(interaction):
+        if (accepted_role and accepted_role in interaction.user.roles) or (interaction.user.id == interaction.guild.owner_id) or (deputy_role_id and any(r.id == deputy_role_id for r in interaction.user.roles)):
             try:
                 await self.member.send("🎉 مبروك! تم **قبول** طلب تقديمك للإدارة.")
             except:
@@ -127,13 +133,13 @@ class AdminDecisionView(View):
             await interaction.message.edit(view=None)
             await interaction.response.send_message(f"✅ تم قبول طلب العضو {self.member.mention} بنجاح.", ephemeral=True)
         else:
-            await interaction.response.send_message("❌ ليس لديك صلاحية قبول التقديم!", ephemeral=True)
+            await interaction.response.send_message("❌ عذراً، هذه الصلاحيات مخصصة للمالك فقط، وللحصول عليها يرجى التواصل مع مالك البوت: **`ii.ih`**", ephemeral=True)
 
     @discord.ui.button(label="رفض", style=discord.ButtonStyle.red, custom_id="reject_app")
     async def reject_app(self, interaction: discord.Interaction, button: Button):
         guild = interaction.guild
         accepted_role = discord.utils.get(guild.roles, name="مسؤول-التقديم")
-        if (accepted_role and accepted_role in interaction.user.roles) or check_owner_or_deputy(interaction):
+        if (accepted_role and accepted_role in interaction.user.roles) or (interaction.user.id == interaction.guild.owner_id) or (deputy_role_id and any(r.id == deputy_role_id for r in interaction.user.roles)):
             try:
                 await self.member.send("❌ نأسف لك، تم **رفض** طلب تقديمك للإدارة في الوقت الحالي.")
             except:
@@ -141,7 +147,7 @@ class AdminDecisionView(View):
             await interaction.message.edit(view=None)
             await interaction.response.send_message(f"❌ تم رفض طلب العضو {self.member.mention}.", ephemeral=True)
         else:
-            await interaction.response.send_message("❌ ليس لديك صلاحية رفض التقديم!", ephemeral=True)
+            await interaction.response.send_message("❌ عذراً، هذه الصلاحيات مخصصة للمالك فقط، وللحصول عليها يرجى التواصل مع مالك البوت: **`ii.ih`**", ephemeral=True)
 
 
 # ==================== 3. نظام التذاكر ====================
@@ -153,12 +159,12 @@ class CloseTicketButton(View):
     async def close_ticket(self, interaction: discord.Interaction, button: Button):
         guild = interaction.guild
         ticket_role = discord.utils.get(guild.roles, name="مسؤول-التذاكر")
-        if (ticket_role and ticket_role in interaction.user.roles) or check_owner_or_deputy(interaction):
+        if (ticket_role and ticket_role in interaction.user.roles) or (interaction.user.id == interaction.guild.owner_id) or (deputy_role_id and any(r.id == deputy_role_id for r in interaction.user.roles)):
             await interaction.response.send_message("⏳ جاري إغلاق التذكرة وحذف الروم...", ephemeral=True)
             await asyncio.sleep(2)
             await interaction.channel.delete()
         else:
-            await interaction.response.send_message("❌ لا تملك صلاحية إغلاق التذكرة!", ephemeral=True)
+            await interaction.response.send_message("❌ عذراً، هذه الصلاحيات مخصصة للمالك فقط، وللحصول عليها يرجى التواصل مع مالك البوت: **`ii.ih`**", ephemeral=True)
 
 class TicketButtonView(View):
     def __init__(self):
@@ -197,8 +203,7 @@ class TicketButtonView(View):
 
 @bot.tree.command(name="setup", description="إعداد رومات النظام الأساسية والتذاكر والتقديم تلقائياً")
 async def setup(interaction: discord.Interaction):
-    if not check_owner_or_deputy(interaction):
-        await interaction.response.send_message("❌ هذا الأمر مخصص لصاحب السيرفر أو النائب فقط!", ephemeral=True)
+    if not await check_owner_or_deputy_perm(interaction):
         return
 
     await interaction.response.defer(ephemeral=True)
@@ -252,8 +257,7 @@ async def setup(interaction: discord.Interaction):
 @bot.tree.command(name="voice", description="تحديد روم صوتي دائم للبوت يدخله تلقائياً")
 @discord.app_commands.describe(voice_channel="اختر الروم الصوتي من سيرفرك")
 async def voice_command(interaction: discord.Interaction, voice_channel: discord.VoiceChannel):
-    if not check_owner_or_deputy(interaction):
-        await interaction.response.send_message("❌ هذا الأمر مخصص لصاحب السيرفر أو النائب فقط!", ephemeral=True)
+    if not await check_owner_or_deputy_perm(interaction):
         return
 
     await interaction.response.defer(ephemeral=True)
@@ -272,7 +276,7 @@ async def voice_command(interaction: discord.Interaction, voice_channel: discord
 @discord.app_commands.describe(role="اختر رتبة النائب")
 async def setrole(interaction: discord.Interaction, role: discord.Role):
     if interaction.user.id != interaction.guild.owner_id:
-        await interaction.response.send_message("❌ هذا الأمر خاص بصاحب السيرفر الأساسي فقط!", ephemeral=True)
+        await interaction.response.send_message("❌ عذراً، هذه الصلاحيات مخصصة للمالك فقط، وللحصول عليها يرجى التواصل مع مالك البوت: **`ii.ih`**", ephemeral=True)
         return
 
     global deputy_role_id
@@ -283,8 +287,7 @@ async def setrole(interaction: discord.Interaction, role: discord.Role):
 @bot.tree.command(name="protect", description="حماية رتبة معينة من التخريب أو السحب")
 @discord.app_commands.describe(role="اختر الرتبة المراد حمايتها")
 async def protect(interaction: discord.Interaction, role: discord.Role):
-    if not check_owner_or_deputy(interaction):
-        await interaction.response.send_message("❌ ليس لديك صلاحية استخدام هذا الأمر!", ephemeral=True)
+    if not await check_owner_or_deputy_perm(interaction):
         return
 
     if role.id not in protected_roles_list:
@@ -297,8 +300,7 @@ async def protect(interaction: discord.Interaction, role: discord.Role):
 @bot.tree.command(name="unjail", description="إخراج عضو من الحجر وإرجاع رتبه السابقة")
 @discord.app_commands.describe(member="اختر العضو المراد إخراجه من الحجر")
 async def unjail(interaction: discord.Interaction, member: discord.Member):
-    if not check_owner_or_deputy(interaction):
-        await interaction.response.send_message("❌ ليس لديك صلاحية استخدام هذا الأمر!", ephemeral=True)
+    if not await check_owner_or_deputy_perm(interaction):
         return
 
     jail_role = discord.utils.get(interaction.guild.roles, name="قوانين-الحجر")
@@ -322,8 +324,7 @@ async def unjail(interaction: discord.Interaction, member: discord.Member):
 @bot.tree.command(name="حذف", description="حذف عدد من الرسائل في الروم (الحد الأقصى 100 رسالة)")
 @discord.app_commands.describe(amount="عدد الرسائل المراد حذفها (من 1 إلى 100)")
 async def clear_messages(interaction: discord.Interaction, amount: int):
-    if not check_owner_or_deputy(interaction):
-        await interaction.response.send_message("❌ هذا الأمر مخصص لصاحب السيرفر أو النائب فقط!", ephemeral=True)
+    if not await check_owner_or_deputy_perm(interaction):
         return
 
     if amount < 1 or amount > 100:
@@ -341,8 +342,7 @@ async def clear_messages(interaction: discord.Interaction, amount: int):
 @bot.tree.command(name="اعلان", description="إنشاء روم إعلانات ونشر إعلان وتثبيته تلقائياً")
 @discord.app_commands.describe(text="اكتب نص الإعلان هنا")
 async def announce(interaction: discord.Interaction, text: str):
-    if not check_owner_or_deputy(interaction):
-        await interaction.response.send_message("❌ هذا الأمر مخصص لصاحب السيرفر أو النائب فقط!", ephemeral=True)
+    if not await check_owner_or_deputy_perm(interaction):
         return
 
     guild = interaction.guild
@@ -365,8 +365,7 @@ async def announce(interaction: discord.Interaction, text: str):
 @bot.tree.command(name="قول", description="إرسال رسالة من خلال البوت إلى أي روم نصي تحدده")
 @discord.app_commands.describe(channel="اختر الروم", message="اكتب الرسالة المراد إرسالها")
 async def say_in_channel(interaction: discord.Interaction, channel: discord.TextChannel, message: str):
-    if not check_owner_or_deputy(interaction):
-        await interaction.response.send_message("❌ هذا الأمر مخصص لصاحب السيرفر أو النائب فقط!", ephemeral=True)
+    if not await check_owner_or_deputy_perm(interaction):
         return
 
     await channel.send(message)
@@ -376,8 +375,7 @@ async def say_in_channel(interaction: discord.Interaction, channel: discord.Text
 @bot.tree.command(name="خاص", description="إرسال رسالة خاصة (DM) لعضو معين من خلال البوت")
 @discord.app_commands.describe(member="اختر العضو", message="اكتب الرسالة الخاصة")
 async def send_dm(interaction: discord.Interaction, member: discord.Member, message: str):
-    if not check_owner_or_deputy(interaction):
-        await interaction.response.send_message("❌ هذا الأمر مخصص لصاحب السيرفر أو النائب فقط!", ephemeral=True)
+    if not await check_owner_or_deputy_perm(interaction):
         return
 
     try:
@@ -385,6 +383,20 @@ async def send_dm(interaction: discord.Interaction, member: discord.Member, mess
         await interaction.response.send_message(f"✅ تم إرسال الرسالة الخاصة إلى {member.mention}", ephemeral=True)
     except discord.Forbidden:
         await interaction.response.send_message(f"❌ لا يمكنني إرسال رسالة خاصة لـ {member.mention} (الخاص مقفل عنده أو حظر البوت).", ephemeral=True)
+
+
+@bot.tree.command(name="المالك", description="عرض معلومات مالك البوت والسيرفر")
+async def owner_info(interaction: discord.Interaction):
+    embed = discord.Embed(
+        title="👑 معلومات مالك البوت",
+        description="معلومات مالك ومصمم النظام:",
+        color=discord.Color.purple()
+    )
+    embed.add_field(name="الاسم", value="Abo Shehri", inline=False)
+    embed.add_field(name="حساب التواصل / المعرف", value="`ii.ih`", inline=False)
+    embed.set_footer(text=interaction.guild.name, icon_url=interaction.guild.icon.url if interaction.guild.icon else None)
+    
+    await interaction.response.send_message(embed=embed)
 
 
 @bot.event
