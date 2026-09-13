@@ -10,6 +10,7 @@ intents.message_content = True
 intents.guilds = True
 intents.members = True
 intents.voice_states = True
+intents.moderation = True  # مفيد جداً لقراءة سجلات الحظر والحذف بدقة
 
 bot = commands.Bot(command_prefix="!", intents=intents)
 
@@ -19,67 +20,70 @@ protected_roles_list = []      # قائمة آيديات الرتب المحمي
 deputy_user_ids = []           # قائمة النواب
 
 # ==================== إعدادات مالك البوت ====================
-# ضع آيدي حسابك الخاص (Discord User ID) هنا بين العلامتين، مثلاً: 123456789012345678
-BOT_OWNER_ID = 0  # <--- ضع آيديك هنا 
+BOT_OWNER_ID = 813236200142929950  # <--- تم تعيين آيديك هنا بنجاح
 # ========================================================
 
 VOICE_CHANNEL_ID = 0  
 
-# دالة التحقق من الصلاحيات (مالك البوت أو أحد النواب المحددين فقط)
 async def check_owner_or_deputy_perm(interaction: discord.Interaction):
     if interaction.user.id == BOT_OWNER_ID or interaction.user.id in deputy_user_ids:
         return True
-    
     if BOT_OWNER_ID == 0 and interaction.user.id == interaction.guild.owner_id:
         return True
     
     await interaction.response.send_message(
-        "❌ عذراً، هذه الصلاحيات مخصصة لمالك البوت الأساسي فقط، وللحصول عليها يرجى التواصل مع المالك: **`ii.ih`**", 
+        "❌ عذراً، هذه الصلاحيات مخصصة لمالك البوت الأساسي فقط، وللحصول عليها يرجى التواصل مع المالك.", 
         ephemeral=True
     )
     return False
 
-# دالة التحقق مما إذا كان العضو معفياً (شخص محمي فردياً، أو لديه رتبة محمية، أو مالك، أو نائب)
 def is_exempted(member: discord.Member):
     if member.id == BOT_OWNER_ID or member.id in deputy_user_ids or member.id == member.guild.owner_id:
         return True
     if member.id in protected_users_list:
         return True
-    # التحقق مما إذا كان العضو يمتلك إحدى الرتب المحمية
     for role in member.roles:
         if role.id in protected_roles_list:
             return True
     return False
 
-# ==================== نظام الحماية الشامل (النيوك ورومات الحذف) ====================
+# ==================== نظام الحماية الصارم لحذف الرومات ====================
 
 @bot.event
 async def on_guild_channel_delete(channel: discord.abc.GuildChannel):
     guild = channel.guild
     attacker = None
+    
+    # الانتظار قليلاً لكي يتم تسجيل الحدث في سجلات الديسكورد (Audit Log)
+    await asyncio.sleep(0.5)
+    
     try:
-        async for entry in guild.audit_logs(limit=5, action=discord.AuditLogAction.channel_delete):
-            if entry.target.id == channel.id:
+        async for entry in guild.audit_logs(limit=3, action=discord.AuditLogAction.channel_delete):
+            if entry.target and entry.target.id == channel.id:
                 attacker = entry.user
                 break
-    except:
-        pass
+    except Exception as e:
+        print(f"⚠️ خطأ أثناء قراءة سجلات الحذف (Audit Log): {e}")
 
-    # إذا كان الحذف من قبل شخص محمي (أو صاحب رتبة محمية، أو مالك، أو نائب)، فلن يتم معاقبته ولن يعيد البوت إنشاء الروم
-    if attacker and is_exempted(attacker):
+    # إذا كان الحذف بواسطة البوت نفسه أو شخص مستثنى (مالك، نائب، محمي)، لا نفعل شيئاً
+    if attacker and (attacker.bot or is_exempted(attacker)):
+        print(f"🛡️ تم تجاهل الحذف لأن الفاعل ({attacker.name}) مستثنى أو البوت.")
         return
 
+    # 1. إعادة إنشاء الروم المحذوف فوراً
     try:
         if isinstance(channel, discord.TextChannel):
-            await guild.create_text_channel(name=channel.name, category=channel.category, overwrites=channel.overwrites, topic=channel.topic)
+            await guild.create_text_channel(name=channel.name, category=channel.category, overwrites=channel.overwrites, topic=channel.topic, position=channel.position)
         elif isinstance(channel, discord.VoiceChannel):
-            await guild.create_voice_channel(name=channel.name, category=channel.category, overwrites=channel.overwrites, bitrate=channel.bitrate, user_limit=channel.user_limit)
+            await guild.create_voice_channel(name=channel.name, category=channel.category, overwrites=channel.overwrites, bitrate=channel.bitrate, user_limit=channel.user_limit, position=channel.position)
         elif isinstance(channel, discord.StageChannel):
-            await guild.create_stage_channel(name=channel.name, category=channel.category, overwrites=channel.overwrites)
+            await guild.create_stage_channel(name=channel.name, category=channel.category, overwrites=channel.overwrites, position=channel.position)
+        print(f"✅ تم إعادة إنشاء الروم المحذوف: {channel.name}")
     except Exception as e:
-        print(f"فشل إعادة إنشاء الروم المحذوف: {e}")
+        print(f"❌ فشل إعادة إنشاء الروم المحذوف: {e}")
 
-    if attacker and not is_exempted(attacker) and not attacker.bot:
+    # 2. معاقبة الفاعل (سحب الرتب وتحويله للحجر)
+    if attacker:
         try:
             member = guild.get_member(attacker.id)
             if member:
@@ -98,17 +102,19 @@ async def on_guild_channel_delete(channel: discord.abc.GuildChannel):
                     await jail_channel.set_permissions(jail_role, view_channel=True, send_messages=True, read_message_history=True)
                     await jail_channel.set_permissions(guild.default_role, view_channel=False)
 
+                # حفظ رتبه الحالية وسحبها وضع رتبة الحجر
                 saved_roles[member.id] = [r for r in member.roles if r != guild.default_role and r != jail_role]
-                await member.edit(roles=[jail_role])
+                await member.edit(roles=[jail_role], reason="حذف روم بدون صلاحية استثناء")
 
                 admin_review = discord.utils.get(guild.text_channels, name="admin-review")
                 if admin_review:
                     await admin_review.send(f"🚨 **تنبيه أمني (حذف روم):** قام العضو غير المحمي {member.mention} بحذف الروم (`{channel.name}`). تم سحب رتبه وتحويله للحجر وإعادة إنشاء الروم!")
+                print(f"🚨 تم معاقبة العضو {member.name} وتحويله للحجر بنجاح.")
         except Exception as e:
-            print(f"خطأ أثناء معاقبة حارس الرومات: {e}")
+            print(f"❌ خطأ أثناء تنفيذ العقوبة على المخالف: {e}")
 
 
-# ==================== الأجزاء التفاعلية (التذاكر والتقديم) ====================
+# ==================== الأجزاء التفاعلية والأوامر ====================
 class ApplicationModal(Modal, title="نموذج التقديم للإدارة"):
     q1 = TextInput(label="الاسم", placeholder="اكتب اسمك هنا...", required=True)
     q2 = TextInput(label="العمر", placeholder="اكتب عمرك...", required=True)
@@ -220,8 +226,6 @@ class TicketButtonView(View):
         await interaction.response.send_message(f"✅ تم فتح تذكرتك بنجاح: {ticket_channel.mention}", ephemeral=True)
 
 
-# ==================== الأوامر (Slash Commands) ====================
-
 @bot.tree.command(name="اعداد_الرومات_الاساسيه", description="إعداد رومات النظام الأساسية والتذاكر والتقديم تلقائياً")
 async def setup(interaction: discord.Interaction):
     if not await check_owner_or_deputy_perm(interaction):
@@ -288,7 +292,7 @@ async def voice_command(interaction: discord.Interaction, voice_channel: discord
         if interaction.guild.me.voice:
             await interaction.guild.me.voice.channel.disconnect()
         await voice_channel.connect()
-        await interaction.followup.send(f"✅ تم ربط البوت بالروم الصوتي **{voice_channel.name}** ودخوله بنجاح (سيعود إليه تلقائياً دائماً)!", ephemeral=True)
+        await interaction.followup.send(f"✅ تم ربط البوت بالروم الصوتي **{voice_channel.name}** ودخوله بنجاح!", ephemeral=True)
     except Exception as e:
         await interaction.followup.send(f"❌ حدث خطأ أثناء الاتصال بالروم: {e}", ephemeral=True)
 
@@ -307,7 +311,6 @@ async def on_voice_state_update(member: discord.Member, before: discord.VoiceSta
             if channel and isinstance(channel, discord.VoiceChannel):
                 try:
                     await channel.connect()
-                    print(f"🔄 تم إعادة ربط البوت تلقائياً بالروم الصوتي: {channel.name}")
                 except Exception as e:
                     print(f"فشل إعادة الاتصال بالروم الصوتي تلقائياً: {e}")
 
@@ -343,8 +346,6 @@ async def removedeputy(interaction: discord.Interaction, member: discord.Member)
     deputy_user_ids.remove(member.id)
     await interaction.response.send_message(f"✅ تم بنجاح إزالة صفة النائب عن العضو {member.mention}.", ephemeral=True)
 
-
-# ==================== أوامر الحماية الشاملة ====================
 
 @bot.tree.command(name="حماية_شخص", description="إضافة شخص معين إلى قائمة المحميين فردياً")
 @discord.app_commands.describe(member="اختر العضو المراد حمايته")
@@ -412,53 +413,29 @@ async def protection_dashboard(interaction: discord.Interaction):
         color=discord.Color.gold()
     )
 
-    # 1. تجميع الأشخاص المحميين فردياً
     users_text = "لا يوجد"
     if protected_users_list:
-        valid_users = []
-        for uid in protected_users_list:
-            m = interaction.guild.get_member(uid)
-            if m:
-                valid_users.append(f"• {m.mention} (`{m.name}`)")
-            else:
-                valid_users.append(f"• `ID: {uid}` (غير موجود)")
+        valid_users = [f"• <@{uid}>" for uid in protected_users_list if interaction.guild.get_member(uid)]
         if valid_users:
             users_text = "\n".join(valid_users)
     embed.add_field(name=f"👤 الأشخاص المحميين ({len(protected_users_list)})", value=users_text, inline=False)
 
-    # 2. تجميع الرتب المحمية
     roles_text = "لا توجد"
     if protected_roles_list:
-        valid_roles = []
-        for rid in protected_roles_list:
-            r = interaction.guild.get_role(rid)
-            if r:
-                valid_roles.append(f"• {r.mention} (`{r.name}`)")
-            else:
-                valid_roles.append(f"• `ID: {rid}` (غير موجودة)")
+        valid_roles = [f"• <@&{rid}>" for rid in protected_roles_list if interaction.guild.get_role(rid)]
         if valid_roles:
             roles_text = "\n".join(valid_roles)
     embed.add_field(name=f"👑 الرتب المحمية ({len(protected_roles_list)})", value=roles_text, inline=False)
 
-    # 3. تجميع النواب
     nawwab_text = "لا يوجد"
     if deputy_user_ids:
-        valid_nawwab = []
-        for uid in deputy_user_ids:
-            m = interaction.guild.get_member(uid)
-            if m:
-                valid_nawwab.append(f"• {m.mention} (`{m.name}`)")
-            else:
-                valid_nawwab.append(f"• `ID: {uid}` (غير موجود)")
+        valid_nawwab = [f"• <@{uid}>" for uid in deputy_user_ids if interaction.guild.get_member(uid)]
         if valid_nawwab:
             nawwab_text = "\n".join(valid_nawwab)
     embed.add_field(name=f"🛡️ النواب المعتمدون ({len(deputy_user_ids)})", value=nawwab_text, inline=False)
 
-    embed.set_footer(text=interaction.guild.name, icon_url=interaction.guild.icon.url if interaction.guild.icon else None)
     await interaction.response.send_message(embed=embed, ephemeral=True)
 
-
-# ==================== الأوامر الإدارية الأخرى ====================
 
 @bot.tree.command(name="فك_الحجر", description="إخراج عضو من الحجر وإعادة رتبه السابقة")
 @discord.app_commands.describe(member="اختر العضو المراد إخراجه من الحجر")
@@ -557,8 +534,6 @@ async def owner_info(interaction: discord.Interaction):
     )
     embed.add_field(name="الاسم", value="Abo Shehri", inline=False)
     embed.add_field(name="حساب التواصل / المعرف", value="`ii.ih`", inline=False)
-    embed.set_footer(text=interaction.guild.name, icon_url=interaction.guild.icon.url if interaction.guild.icon else None)
-    
     await interaction.response.send_message(embed=embed)
 
 
@@ -573,7 +548,6 @@ async def on_ready():
             if channel and isinstance(channel, discord.VoiceChannel):
                 try:
                     await channel.connect()
-                    print(f"Connected automatically to voice channel: {channel.name} in {guild.name}")
                 except Exception as e:
                     print(f"Failed to auto-connect to voice channel: {e}")
 
