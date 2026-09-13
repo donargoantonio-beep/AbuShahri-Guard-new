@@ -255,7 +255,7 @@ class TicketButtonView(View):
 
 # ==================== الأوامر (Slash Commands) ====================
 
-@bot.tree.command(name="اعدادات", description="إعداد رومات النظام الأساسية والتذاكر والتقديم تلقائياً")
+@bot.tree.command(name="اعداد_الرومات_الاساسيه", description="إعداد رومات النظام الأساسية والتذاكر والتقديم تلقائياً")
 async def setup(interaction: discord.Interaction):
     if not await check_owner_or_deputy_perm(interaction):
         return
