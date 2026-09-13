@@ -10,17 +10,17 @@ intents.message_content = True
 intents.guilds = True
 intents.members = True
 intents.voice_states = True
-intents.moderation = True  # مفيد جداً لقراءة سجلات الحظر والحذف بدقة
+intents.moderation = True  # مهم جداً لقراءة سجلات الحظر والحذف
 
 bot = commands.Bot(command_prefix="!", intents=intents)
 
 saved_roles = {}
-protected_users_list = []      # قائمة آيديات الأشخاص المحميين فردياً
-protected_roles_list = []      # قائمة آيديات الرتب المحمية
-deputy_user_ids = []           # قائمة النواب
+protected_users_list = []      
+protected_roles_list = []      
+deputy_user_ids = []           
 
 # ==================== إعدادات مالك البوت ====================
-BOT_OWNER_ID = 813236200142929950  # <--- تم تعيين آيديك هنا بنجاح
+BOT_OWNER_ID = 813236200142929950  # <--- آيديك الأساسي
 # ========================================================
 
 VOICE_CHANNEL_ID = 0  
@@ -32,7 +32,7 @@ async def check_owner_or_deputy_perm(interaction: discord.Interaction):
         return True
     
     await interaction.response.send_message(
-        "❌ عذراً، هذه الصلاحيات مخصصة لمالك البوت الأساسي فقط، وللحصول عليها يرجى التواصل مع المالك.", 
+        "❌ عذراً، هذه الصلاحيات مخصصة لمالك البوت والنواب فقط.", 
         ephemeral=True
     )
     return False
@@ -54,7 +54,6 @@ async def on_guild_channel_delete(channel: discord.abc.GuildChannel):
     guild = channel.guild
     attacker = None
     
-    # الانتظار قليلاً لكي يتم تسجيل الحدث في سجلات الديسكورد (Audit Log)
     await asyncio.sleep(0.5)
     
     try:
@@ -63,14 +62,12 @@ async def on_guild_channel_delete(channel: discord.abc.GuildChannel):
                 attacker = entry.user
                 break
     except Exception as e:
-        print(f"⚠️ خطأ أثناء قراءة سجلات الحذف (Audit Log): {e}")
+        print(f"⚠️ خطأ أثناء قراءة سجلات الحذف: {e}")
 
-    # إذا كان الحذف بواسطة البوت نفسه أو شخص مستثنى (مالك، نائب، محمي)، لا نفعل شيئاً
     if attacker and (attacker.bot or is_exempted(attacker)):
-        print(f"🛡️ تم تجاهل الحذف لأن الفاعل ({attacker.name}) مستثنى أو البوت.")
         return
 
-    # 1. إعادة إنشاء الروم المحذوف فوراً
+    # 1. إعادة إنشاء الروم المحذوف
     try:
         if isinstance(channel, discord.TextChannel):
             await guild.create_text_channel(name=channel.name, category=channel.category, overwrites=channel.overwrites, topic=channel.topic, position=channel.position)
@@ -78,11 +75,10 @@ async def on_guild_channel_delete(channel: discord.abc.GuildChannel):
             await guild.create_voice_channel(name=channel.name, category=channel.category, overwrites=channel.overwrites, bitrate=channel.bitrate, user_limit=channel.user_limit, position=channel.position)
         elif isinstance(channel, discord.StageChannel):
             await guild.create_stage_channel(name=channel.name, category=channel.category, overwrites=channel.overwrites, position=channel.position)
-        print(f"✅ تم إعادة إنشاء الروم المحذوف: {channel.name}")
     except Exception as e:
-        print(f"❌ فشل إعادة إنشاء الروم المحذوف: {e}")
+        print(f"❌ فشل إعادة إنشاء الروم: {e}")
 
-    # 2. معاقبة الفاعل (سحب الرتب وتحويله للحجر)
+    # 2. معاقبة الفاعل
     if attacker:
         try:
             member = guild.get_member(attacker.id)
@@ -102,19 +98,99 @@ async def on_guild_channel_delete(channel: discord.abc.GuildChannel):
                     await jail_channel.set_permissions(jail_role, view_channel=True, send_messages=True, read_message_history=True)
                     await jail_channel.set_permissions(guild.default_role, view_channel=False)
 
-                # حفظ رتبه الحالية وسحبها وضع رتبة الحجر
                 saved_roles[member.id] = [r for r in member.roles if r != guild.default_role and r != jail_role]
-                await member.edit(roles=[jail_role], reason="حذف روم بدون صلاحية استثناء")
+                await member.edit(roles=[jail_role], reason="حذف روم بدون صلاحية")
 
-                admin_review = discord.utils.get(guild.text_channels, name="admin-review")
-                if admin_review:
-                    await admin_review.send(f"🚨 **تنبيه أمني (حذف روم):** قام العضو غير المحمي {member.mention} بحذف الروم (`{channel.name}`). تم سحب رتبه وتحويله للحجر وإعادة إنشاء الروم!")
-                print(f"🚨 تم معاقبة العضو {member.name} وتحويله للحجر بنجاح.")
+                # إرسال لوق الحذف الخاص بالرومات
+                log_delete = discord.utils.get(guild.text_channels, name="لوق_الحذف-💿")
+                if not log_delete:
+                    log_delete = discord.utils.get(guild.text_channels, name="لوق_الحذف")
+
+                if log_delete:
+                    embed = discord.Embed(title="🚨 حذف روم غير مصرح به", color=discord.Color.red())
+                    embed.add_field(name="المخالف", value=member.mention, inline=False)
+                    embed.add_field(name="الروم المحذوف", value=channel.name, inline=False)
+                    embed.description = "تمت معاقبته وتحويله للحجر وإعادة إنشاء الروم تلقائياً."
+                    await log_delete.send(embed=embed)
         except Exception as e:
-            print(f"❌ خطأ أثناء تنفيذ العقوبة على المخالف: {e}")
+            print(f"❌ خطأ أثناء معاقبة المخالف: {e}")
 
 
-# ==================== الأجزاء التفاعلية والأوامر ====================
+# ==================== أحداث اللوقات الشاملة (Log Events) ====================
+
+# 1. دخول وخروج الأعضاء
+@bot.event
+async def on_member_join(member: discord.Member):
+    channel = discord.utils.get(member.guild.text_channels, name="دخول_خروج-💿") or discord.utils.get(member.guild.text_channels, name="دخول_خروج")
+    if channel:
+        embed = discord.Embed(title="📥 عضو جديد انضم للسيرفر", color=discord.Color.green(), timestamp=discord.utils.utcnow())
+        embed.set_thumbnail(url=member.display_avatar.url)
+        embed.add_field(name="العضو", value=f"{member.mention} (`{member.id}`)", inline=False)
+        embed.add_field(name="تاريخ إنشاء الحساب", value=f"<t:{int(member.created_at.timestamp())}:R>", inline=False)
+        embed.set_footer(text=f"عدد الأعضاء الآن: {member.guild.member_count}")
+        await channel.send(embed=embed)
+
+@bot.event
+async def on_member_remove(member: discord.Member):
+    channel = discord.utils.get(member.guild.text_channels, name="دخول_خروج-💿") or discord.utils.get(member.guild.text_channels, name="دخول_خروج")
+    if channel:
+        embed = discord.Embed(title="📤 عضو غادر السيرفر", color=discord.Color.orange(), timestamp=discord.utils.utcnow())
+        embed.set_thumbnail(url=member.display_avatar.url)
+        embed.add_field(name="العضو", value=f"{member.mention} (`{member.id}`)", inline=False)
+        await channel.send(embed=embed)
+
+# 2. لوق تعديل الرتب
+@bot.event
+async def on_member_update(before: discord.Member, after: discord.Member):
+    if before.roles != after.roles:
+        channel = discord.utils.get(after.guild.text_channels, name="لوق_رتب-💿") or discord.utils.get(after.guild.text_channels, name="لوق_رتب")
+        if channel:
+            added_roles = [r for r in after.roles if r not in before.roles]
+            removed_roles = [r for r in before.roles if r not in after.roles]
+            
+            embed = discord.Embed(title="👑 تحديث رتب عضو", color=discord.Color.blue(), timestamp=discord.utils.utcnow())
+            embed.add_field(name="العضو", value=after.mention, inline=False)
+            if added_roles:
+                embed.add_field(name="🟢 رتب تمت إضافتها", value=", ".join([r.mention for r in added_roles]), inline=False)
+            if removed_roles:
+                embed.add_field(name="🔴 رتب تمت إزالتها", value=", ".join([r.mention for r in removed_roles]), inline=False)
+            await channel.send(embed=embed)
+
+# 3. لوق تغيير الألقاب
+    if before.nick != after.nick:
+        channel = discord.utils.get(after.guild.text_channels, name="تغير_لقب-💿") or discord.utils.get(after.guild.text_channels, name="تغير_لقب")
+        if channel:
+            embed = discord.Embed(title="✏️ تغير لقب عضو", color=discord.Color.gold(), timestamp=discord.utils.utcnow())
+            embed.add_field(name="العضو", value=after.mention, inline=False)
+            embed.add_field(name="اللقب القديم", value=before.nick or "لا يوجد", inline=True)
+            embed.add_field(name="اللقب الجديد", value=after.nick or "لا يوجد", inline=True)
+            await channel.send(embed=embed)
+
+# 4. لوق حذف الرسائل
+@bot.event
+async def on_message_delete(message: discord.Message):
+    if message.author.bot or not message.guild:
+        return
+    channel = discord.utils.get(message.guild.text_channels, name="لوق_الحذف-💿") or discord.utils.get(message.guild.text_channels, name="لوق_الحذف")
+    if channel:
+        embed = discord.Embed(title="🗑️ حذف رسالة", color=discord.Color.dark_red(), timestamp=discord.utils.utcnow())
+        embed.add_field(name="صاحب الرسالة", value=message.author.mention, inline=True)
+        embed.add_field(name="الروم", value=message.channel.mention, inline=True)
+        embed.add_field(name="محتوى الرسالة المحذوفة", value=message.content or "*(رسالة فارغة أو تحتوي على وسائط)*", inline=False)
+        await channel.send(embed=embed)
+
+# 5. لوق الطرد (Ban / Kick)
+@bot.event
+async def on_member_ban(guild: discord.Guild, user: discord.User):
+    channel = discord.utils.get(guild.text_channels, name="لوق_طرد-💿") or discord.utils.get(guild.text_channels, name="لوق_طرد")
+    if channel:
+        embed = discord.Embed(title="🔨 حظر عضو (Ban)", color=discord.Color.dark_magenta(), timestamp=discord.utils.utcnow())
+        embed.add_field(name="العضو المحظور", value=f"{user.mention} (`{user.id}`)", inline=False)
+        await channel.send(embed=embed)
+
+
+# ==================== الأوامر الإدارية والأزرار ====================
+
 class ApplicationModal(Modal, title="نموذج التقديم للإدارة"):
     q1 = TextInput(label="الاسم", placeholder="اكتب اسمك هنا...", required=True)
     q2 = TextInput(label="العمر", placeholder="اكتب عمرك...", required=True)
@@ -224,6 +300,44 @@ class TicketButtonView(View):
         embed = discord.Embed(title="تذكرة جديدة", description="أهلاً بك، يرجى كتابة مشكلتك أو استفسارك وسيقوم فريق الدعم بالرد عليك في أقرب وقت.", color=discord.Color.blue())
         await ticket_channel.send(content=f"{interaction.user.mention}", embed=embed, view=CloseTicketButton())
         await interaction.response.send_message(f"✅ تم فتح تذكرتك بنجاح: {ticket_channel.mention}", ephemeral=True)
+
+
+# ==================== أمر إنشاء رومات اللوقات الجديدة ====================
+@bot.tree.command(name="اعداد_اللوقات", description="إنشاء جميع رومات اللوقات الإدارية بدقة نفس الشكل المطلوب تلقائياً")
+async def setup_logs(interaction: discord.Interaction):
+    if not await check_owner_or_deputy_perm(interaction):
+        return
+
+    await interaction.response.defer(ephemeral=True)
+    guild = interaction.guild
+
+    # إنشاء كاتلوج خاص للوقات لتنظيم السيرفر
+    category = discord.utils.get(guild.categories, name="سجلات الإدارة || 💿")
+    if not category:
+        category = await guild.create_category("سجلات الإدارة || 💿")
+
+    log_names = [
+        "لوق_تايم || 💿",
+        "لوق_الحذف || 💿",
+        "دخول_خروج || 💿",
+        "لوق_طرد || 💿",
+        "لوق_رتب || 💿",
+        "تغير_لقب || 💿"
+    ]
+
+    overwrites = {
+        guild.default_role: discord.PermissionOverwrite(view_channel=False),
+        guild.me: discord.PermissionOverwrite(view_channel=True, send_messages=True)
+    }
+
+    created_count = 0
+    for name in log_names:
+        existing = discord.utils.get(category.text_channels, name=name)
+        if not existing:
+            await guild.create_text_channel(name, category=category, overwrites=overwrites)
+            created_count += 1
+
+    await interaction.followup.send(f"✅ تم إنشاء رومات اللوقات بنجاح داخل قسم `سجلات الإدارة || 💿` وعددها المستحدثة: {created_count}", ephemeral=True)
 
 
 @bot.tree.command(name="اعداد_الرومات_الاساسيه", description="إعداد رومات النظام الأساسية والتذاكر والتقديم تلقائياً")
@@ -522,7 +636,7 @@ async def send_dm(interaction: discord.Interaction, member: discord.Member, mess
         await member.send(f"📬 رسالة إدارية من سيرفر **{interaction.guild.name}**:\n\n{message}")
         await interaction.response.send_message(f"✅ تم إرسال الرسالة الخاصة إلى {member.mention}", ephemeral=True)
     except discord.Forbidden:
-        await interaction.response.send_message(f"❌ لا يمكنني إرسال رسالة خاصة لهذا العضو (الخاص مقفل لديه).", ephemeral=True)
+        await interaction.response.send_message(f"❌ لا يمكنني إرسال رسالة خاصة لهذا العضو (الخاص مقفل لديه).", ephemeral.True)
 
 
 @bot.tree.command(name="المالك", description="عرض معلومات مالك البوت")
