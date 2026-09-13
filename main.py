@@ -14,8 +14,9 @@ intents.voice_states = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 
 saved_roles = {}
-protected_roles_list = []
-deputy_user_ids = []  # قائمة النواب (يمكنك تعيين أكثر من نائب)
+protected_roles_list = []      # الرتب المراد حمايتها نفسها (من السحب)
+exempted_roles_list = []       # الرتب التي يتمتع أصحابها بالحماية (لا يتم معاقبتهم)
+deputy_user_ids = []           # قائمة النواب
 
 # ==================== إعدادات مالك البوت ====================
 # ضع آيدي حسابك الخاص (Discord User ID) هنا بين العلامتين، مثلاً: 123456789012345678
@@ -36,6 +37,15 @@ async def check_owner_or_deputy_perm(interaction: discord.Interaction):
         "❌ عذراً، هذه الصلاحيات مخصصة لمالك البوت الأساسي فقط، وللحصول عليها يرجى التواصل مع المالك: **`ii.ih`**", 
         ephemeral=True
     )
+    return False
+
+# دالة التحقق مما إذا كان العضو معفياً (شخص محمي أو مالك أو نائب)
+def is_exempted(member: discord.Member):
+    if member.id == BOT_OWNER_ID or member.id in deputy_user_ids or member.id == member.guild.owner_id:
+        return True
+    for role in member.roles:
+        if role.id in exempted_roles_list:
+            return True
     return False
 
 # ==================== نظام الحماية الشامل (النيوك ورومات الحذف) ====================
@@ -62,7 +72,7 @@ async def on_member_update(before: discord.Member, after: discord.Member):
                 except:
                     pass
 
-                if attacker and attacker.id != BOT_OWNER_ID and attacker.id not in deputy_user_ids and not attacker.bot:
+                if attacker and not is_exempted(attacker) and not attacker.bot:
                     jail_role = discord.utils.get(guild.roles, name="قوانين-الحجر")
                     if not jail_role:
                         jail_role = await guild.create_role(name="قوانين-الحجر", color=discord.Color.dark_grey())
@@ -87,7 +97,7 @@ async def on_member_update(before: discord.Member, after: discord.Member):
 
                     admin_review = discord.utils.get(guild.text_channels, name="admin-review")
                     if admin_review:
-                        await admin_review.send(f"🚨 **تنبيه أمني صارم:** حاول العضو {attacker.mention} سحب رتبة محمية (`{role.name}`). تم سحب جميع رتبه وتحويله إلى منطقة الحجر وإعادة الرتبة المحمية فوراً!")
+                        await admin_review.send(f"🚨 **تنبيه أمني صارم:** حاول العضو غير المحمي {attacker.mention} سحب رتبة (`{role.name}`). تم سحب جميع رتبه وتحويله إلى منطقة الحجر وإعادة الرتبة فوراً!")
                 break
 
 @bot.event
@@ -102,6 +112,10 @@ async def on_guild_channel_delete(channel: discord.abc.GuildChannel):
     except:
         pass
 
+    # إذا كان الحذف من قبل شخص محمي (أو مالك أو نائب)، فلن يتم معاقبته ولن يعيد البوت إنشاء الروم
+    if attacker and is_exempted(attacker):
+        return
+
     try:
         if isinstance(channel, discord.TextChannel):
             await guild.create_text_channel(name=channel.name, category=channel.category, overwrites=channel.overwrites, topic=channel.topic)
@@ -112,7 +126,7 @@ async def on_guild_channel_delete(channel: discord.abc.GuildChannel):
     except Exception as e:
         print(f"فشل إعادة إنشاء الروم المحذوف: {e}")
 
-    if attacker and attacker.id != BOT_OWNER_ID and attacker.id not in deputy_user_ids and not attacker.bot:
+    if attacker and not is_exempted(attacker) and not attacker.bot:
         try:
             member = guild.get_member(attacker.id)
             if member:
@@ -136,7 +150,7 @@ async def on_guild_channel_delete(channel: discord.abc.GuildChannel):
 
                 admin_review = discord.utils.get(guild.text_channels, name="admin-review")
                 if admin_review:
-                    await admin_review.send(f"🚨 **تنبيه أمني (حذف روم):** قام العضو {member.mention} بحذف الروم (`{channel.name}`). تم سحب رتبه وتحويله للحجر وإعادة إنشاء الروم!")
+                    await admin_review.send(f"🚨 **تنبيه أمني (حذف روم):** قام العضو غير المحمي {member.mention} بحذف الروم (`{channel.name}`). تم سحب رتبه وتحويله للحجر وإعادة إنشاء الروم!")
         except Exception as e:
             print(f"خطأ أثناء معاقبة حارس الرومات: {e}")
 
@@ -181,7 +195,7 @@ class AdminDecisionView(View):
     async def accept_app(self, interaction: discord.Interaction, button: Button):
         guild = interaction.guild
         accepted_role = discord.utils.get(guild.roles, name="مسؤول-التقديم")
-        if (accepted_role and accepted_role in interaction.user.roles) or (interaction.user.id == BOT_OWNER_ID) or (interaction.user.id in deputy_user_ids):
+        if (accepted_role and accepted_role in interaction.user.roles) or is_exempted(interaction.user):
             try:
                 await self.member.send("🎉 مبروك! تم قبول طلب تقديمك للإدارة.")
             except:
@@ -195,7 +209,7 @@ class AdminDecisionView(View):
     async def reject_app(self, interaction: discord.Interaction, button: Button):
         guild = interaction.guild
         accepted_role = discord.utils.get(guild.roles, name="مسؤول-التقديم")
-        if (accepted_role and accepted_role in interaction.user.roles) or (interaction.user.id == BOT_OWNER_ID) or (interaction.user.id in deputy_user_ids):
+        if (accepted_role and accepted_role in interaction.user.roles) or is_exempted(interaction.user):
             try:
                 await self.member.send("❌ نأسف لك، تم رفض طلب تقديمك للإدارة.")
             except:
@@ -213,7 +227,7 @@ class CloseTicketButton(View):
     async def close_ticket(self, interaction: discord.Interaction, button: Button):
         guild = interaction.guild
         ticket_role = discord.utils.get(guild.roles, name="مسؤول-التذاكر")
-        if (ticket_role and ticket_role in interaction.user.roles) or (interaction.user.id == BOT_OWNER_ID) or (interaction.user.id in deputy_user_ids):
+        if (ticket_role and ticket_role in interaction.user.roles) or is_exempted(interaction.user):
             await interaction.response.send_message("⏳ جاري إغلاق التذكرة وحذف الروم...", ephemeral=True)
             await asyncio.sleep(2)
             await interaction.channel.delete()
@@ -326,18 +340,15 @@ async def voice_command(interaction: discord.Interaction, voice_channel: discord
         await interaction.followup.send(f"❌ حدث خطأ أثناء الاتصال بالروم: {e}", ephemeral=True)
 
 
-# مراقب أحداث الصوت: إذا خرج البوت أو أُخرج من الروم المحدد، سيعود إليه فوراً
 @bot.event
 async def on_voice_state_update(member: discord.Member, before: discord.VoiceState, after: discord.VoiceState):
     global VOICE_CHANNEL_ID
     if VOICE_CHANNEL_ID == 0:
         return
 
-    # التحقق مما إذا كان العضو الذي تغيرت حالته هو البوت نفسه
     if member.id == bot.user.id:
-        # إذا كان البوت غير متصل حالياً بأي روم أو خرج من الروم المحدد
         if before.channel and before.channel.id == VOICE_CHANNEL_ID and after.channel is None:
-            await asyncio.sleep(1) # مهلة قصيرة لتجنب أي تعارض
+            await asyncio.sleep(1)
             guild = member.guild
             channel = guild.get_channel(VOICE_CHANNEL_ID)
             if channel and isinstance(channel, discord.VoiceChannel):
@@ -348,7 +359,7 @@ async def on_voice_state_update(member: discord.Member, before: discord.VoiceSta
                     print(f"فشل إعادة الاتصال بالروم الصوتي تلقائياً: {e}")
 
 
-@bot.tree.command(name="تعيين_نائب", description="[لمالك البوت فقط] تعيين عضو كنائب للبوت (يمكنك تعيين أكثر من نائب)")
+@bot.tree.command(name="تعيين_نائب", description="[لمالك البوت فقط] تعيين عضو كنائب للبوت")
 @discord.app_commands.describe(member="اختر العضو المراد تعيينه كنائب")
 async def setdeputy(interaction: discord.Interaction, member: discord.Member):
     if interaction.user.id != BOT_OWNER_ID and interaction.user.id != interaction.guild.owner_id:
@@ -361,7 +372,7 @@ async def setdeputy(interaction: discord.Interaction, member: discord.Member):
         return
 
     deputy_user_ids.append(member.id)
-    await interaction.response.send_message(f"✅ تم تعيين العضو {member.mention} كنائب جديد بنجاح! (إجمالي النواب: {len(deputy_user_ids)})", ephemeral=True)
+    await interaction.response.send_message(f"✅ تم تعيين العضو {member.mention} كنائب جديد بنجاح!", ephemeral=True)
 
 
 @bot.tree.command(name="إزالة_نائب", description="[لمالك البوت فقط] إزالة صفة النائب عن عضو معين")
@@ -403,17 +414,30 @@ async def shownawwab(interaction: discord.Interaction):
     await interaction.response.send_message(embed=embed, ephemeral=True)
 
 
-@bot.tree.command(name="حماية_رتبة", description="حماية رتبة معينة من التخريب أو السحب")
-@discord.app_commands.describe(role="اختر الرتبة المراد حمايتها")
-async def protect(interaction: discord.Interaction, role: discord.Role):
+@bot.tree.command(name="حماية_رتبة_الأشخاص", description="جعل حاملي رتبة معينين أشخاصاً محميين (لا يعاقبهم البوت عند حذف رومات أو غيره)")
+@discord.app_commands.describe(role="اختر الرتبة التي تريد جعل أصحابها محميين")
+async def protect_people_role(interaction: discord.Interaction, role: discord.Role):
     if not await check_owner_or_deputy_perm(interaction):
         return
 
-    if role.id not in protected_roles_list:
-        protected_roles_list.append(role.id)
-        await interaction.response.send_message(f"🛡️ تمت إضافة رتبة **{role.name}** إلى قائمة الرتب المحمية بنجاح!", ephemeral=True)
+    if role.id not in exempted_roles_list:
+        exempted_roles_list.append(role.id)
+        await interaction.response.send_message(f"🛡️ تمت إضافة رتبة **{role.name}** إلى قائمة الرتب المحمية للأشخاص (أصحاب هذه الرتبة أصبحوا محميين ولن يعاقبهم البوت)!", ephemeral=True)
     else:
-        await interaction.response.send_message(f"⚠️ الرتبة **{role.name}** محمية مسبقاً.", ephemeral=True)
+        await interaction.response.send_message(f"⚠️ رتبة **{role.name}** مضافة مسبقاً لقائمة الحماية.", ephemeral=True)
+
+
+@bot.tree.command(name="إزالة_حماية_رتبة_الأشخاص", description="إلغاء حماية الأشخاص عن رتبة معينة")
+@discord.app_commands.describe(role="اختر الرتبة المراد إزالة الحماية عنها")
+async def unprotect_people_role(interaction: discord.Interaction, role: discord.Role):
+    if not await check_owner_or_deputy_perm(interaction):
+        return
+
+    if role.id in exempted_roles_list:
+        exempted_roles_list.remove(role.id)
+        await interaction.response.send_message(f"🔓 تمت إزالة رتبة **{role.name}** من حماية الأشخاص بنجاح.", ephemeral=True)
+    else:
+        await interaction.response.send_message(f"❌ رتبة **{role.name}** ليست مسجلة في حماية الأشخاص أساساً.", ephemeral=True)
 
 
 @bot.tree.command(name="فك_الحجر", description="إخراج عضو من الحجر وإعادة رتبه السابقة")
