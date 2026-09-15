@@ -29,7 +29,7 @@ VOICE_CHANNEL_ID = 0
 BAD_WORDS = ["كلب", "حمار", "قحبة", "زق", "خرا", "شمهور", "يعور", "لعنة", "قحط"] 
 SPAM_TRACKER = {}
 
-# نص القوانين المطابق للصلة في الصورة
+# نص القوانين
 RULES_TEXT = """📜 **قوانين وعقوبات السيرفر:**
 
 1. **السب والشتم والألفاظ النابية:** يمنع منعاً باتاً (عقوبة: تحويل لرتبة محجور).
@@ -218,18 +218,39 @@ async def on_message(message: discord.Message):
 async def on_member_join(member: discord.Member):
     guild = member.guild
     
-    # 1. إرسال القوانين بنفس شكل وثيم الصورة المطابقة
+    # 1. إرسال القوانين للخاص بنفس شكل العنوان في الصورة + زر الانتقال للسيرفر
     try:
+        # إنشاء رابط دعوة تلقائي لإضافته في الزر
+        invite_url = None
+        try:
+            invites = await guild.invites()
+            if invites:
+                invite_url = invites[0].url
+            elif guild.system_channel:
+                new_invite = await guild.system_channel.create_invite(max_age=0, max_uses=0)
+                invite_url = new_invite.url
+            elif guild.text_channels:
+                new_invite = await guild.text_channels[0].create_invite(max_age=0, max_uses=0)
+                invite_url = new_invite.url
+        except Exception as e:
+            print(f"⚠️ متعذر إنتاج رابط دعوة: {e}")
+
         dm_embed = discord.Embed(
-            title=f"أهلاً بك في 💭 {guild.name} | ! 🌟",
+            title=f"سيرفر {guild.name}⛅ |  - نرجو الالتزام |",
             description=RULES_TEXT,
             color=discord.Color.blurple()
         )
-        await member.send(embed=dm_embed)
+
+        view = View()
+        if invite_url:
+            view.add_item(Button(label=f"سيرفر {guild.name}", url=invite_url, style=discord.ButtonStyle.link))
+            await member.send(embed=dm_embed, view=view)
+        else:
+            await member.send(embed=dm_embed)
     except discord.Forbidden:
         pass
 
-    # 2. الترحيب في سيرفر الترحيب
+    # 2. الترحيب في روم الترحيب
     channel = discord.utils.get(guild.text_channels, name="الترحيب〢✋🏻")
     if channel:
         embed = discord.Embed(
@@ -694,7 +715,7 @@ async def unprotect_role(interaction: discord.Interaction, role: discord.Role):
         await interaction.response.send_message(f"❌ الرتبه {role.mention} ليست موجودة في قائمة الرتب المحمية أساساً.", ephemeral=True)
 
 
-@bot.tree.command(name="قائمة_الحماية", description="عرض لوحة شاملة لجميع الأشخاص والرتب المحمية والنواب")
+@bot.tree.command(name="قائمة_الحماية", description="عرض لوحة شاملة لجميع الأشخاص والرتب والنواب المحميين")
 async def protection_dashboard(interaction: discord.Interaction):
     global protected_users_list, protected_roles_list, deputy_user_ids
 
