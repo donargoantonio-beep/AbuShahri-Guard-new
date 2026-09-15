@@ -110,39 +110,31 @@ async def on_guild_channel_delete(channel: discord.abc.GuildChannel):
             print(f"❌ خطأ أثناء معاقبة المخالف: {e}")
 
 
-# ==================== نظام الترحيب التلقائي المطور ====================
+# ==================== نظام الترحيب المخصص بالروم المحدد ====================
 
 @bot.event
 async def on_member_join(member: discord.Member):
     guild = member.guild
     
-    # البحث عن روم الترحيب، وإذا لم يكن موجوداً، يقوم البوت بإنشائه تلقائياً!
-    channel = discord.utils.get(guild.text_channels, name="الترحيب") or discord.utils.get(guild.text_channels, name="welcome")
-    if not channel:
-        try:
-            channel = await guild.create_text_channel("الترحيب")
-        except Exception as e:
-            print(f"❌ لم يتمكن البوت من إنشاء روم الترحيب تلقائياً: {e}")
-            return
+    # الاعتماد فقط على الروم المحدد بالاسم الجديد دون إنشاء رومات جديدة
+    channel = discord.utils.get(guild.text_channels, name="الترحيب〢✋🏻")
+    if channel:
+        server_icon = guild.icon.url if guild.icon else member.display_avatar.url
 
-    # جلب صورة السيرفر (إذا وجدت) أو استخدام صورة افتراضية
-    server_icon = guild.icon.url if guild.icon else member.display_avatar.url
+        embed = discord.Embed(
+            title=f"أهلاً بك في {guild.name}! 🎉",
+            description=f"مرحباً بك {member.mention} في سيرفرنا!\nنحن سعداء جداً بانضمامك إلينا ونتمنى لك قضاء أوقات ممتعة معنا.",
+            color=discord.Color.brand_green(),
+            timestamp=discord.utils.utcnow()
+        )
+        
+        embed.set_thumbnail(url=member.display_avatar.url)
+        embed.set_image(url=server_icon)
+        
+        embed.add_field(name="📋 معلومات العضو", value=f"• الترتيب في السيرفر: **#{guild.member_count}**\n• تاريخ إنشاء الحساب: <t:{int(member.created_at.timestamp())}:R>", inline=False)
+        embed.set_footer(text=guild.name, icon_url=server_icon)
 
-    embed = discord.Embed(
-        title=f"أهلاً بك في {guild.name}! 🎉",
-        description=f"مرحباً بك {member.mention} في سيرفرنا!\nنحن سعداء جداً بانضمامك إلينا ونتمنى لك قضاء أوقات ممتعة معنا.",
-        color=discord.Color.brand_green(),
-        timestamp=discord.utils.utcnow()
-    )
-    
-    # وضع صورة العضو كأيقونة مصغرة وصورة السيرفر كشعار رئيسي للترفيه والاحترافية
-    embed.set_thumbnail(url=member.display_avatar.url)
-    embed.set_image(url=server_icon)
-    
-    embed.add_field(name="📋 معلومات العضو", value=f"• الترتيب في السيرفر: **#{guild.member_count}**\n• تاريخ إنشاء الحساب: <t:{int(member.created_at.timestamp())}:R>", inline=False)
-    embed.set_footer(text=guild.name, icon_url=server_icon)
-
-    await channel.send(embed=embed)
+        await channel.send(embed=embed)
 
     # لوق دخول وخروج الأعضاء التقليدي
     log_channel = discord.utils.get(guild.text_channels, name="دخول_خروج-💿") or discord.utils.get(guild.text_channels, name="دخول_خروج")
