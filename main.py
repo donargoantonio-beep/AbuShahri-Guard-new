@@ -26,15 +26,18 @@ BOT_OWNER_ID = 813236200142929950  # <--- آيديك الأساسي
 
 VOICE_CHANNEL_ID = 0  
 
-# قائمة الكلمات النابية والسب الممنوعة
-BAD_WORDS = ["كلب", "حمار", "قحبة", "زق", "خرا", "شمهور", "يعور", "لعنة", "قحط"] 
+# قائمة الكلمات النابية والسب الممنوعة (عربي وإنجليزي)
+BAD_WORDS = [
+    "كلب", "حمار", "قحبة", "زق", "خرا", "شمهور", "يعور", "لعنة", "قحط",
+    "fuck", "shit", "bitch", "asshole", "dick", "bastard", "cunt", "pussy"
+] 
 SPAM_TRACKER = {}
 
-# نص القوانين للإرسال بالخاص (محدثة حسب طلبك)
+# نص القوانين للإرسال بالخاص
 RULES_TEXT = """
 📜 **قوانين وعقوبات سيرفرنا:**
 
-1. **السب والشتم والألفاظ النابية:**
+1. **السب والشتم والألفاظ النابية (عربي / إنجليزي):**
    • *العقوبة:* **وضع العضو في الحجر فوراً** مع سحب الرتب المؤقتة وإرسال التقرير للإدارة.
 2. **إرسال الروابط والدعوات الخارجية:**
    • *العقوبة:* **تايم آوت (Timeout) لمدة ساعة كاملة** + حذف الرسالة.
@@ -146,20 +149,20 @@ async def on_message(message: discord.Message):
     violation_type = None
     action_taken = None
 
-    # 1. فحص السب والشتم (العقوبة: وضع بالحجر)
+    # 1. فحص السب والشتم (عربي وإنجليزي)
     for word in BAD_WORDS:
         if word in content_lower:
-            violation_type = "السب والشتم / ألفاظ نابية"
-            action_taken = "وضع العضو في الحجر"
+            violation_type = "السب والشتم / ألفاظ نابية (عربي أو إنجليزي)"
+            action_taken = "وضع العضو في الحجر وحذف الرسالة"
             break
 
-    # 2. فحص الروابط (العقوبة: تايم آوت ساعة)
+    # 2. فحص الروابط
     if not violation_type:
         if "http://" in content_lower or "https://" in content_lower or "discord.gg/" in content_lower or "www." in content_lower:
             violation_type = "إرسال روابط غير مصرح بها"
-            action_taken = "تايم آوت لمدة ساعة"
+            action_taken = "تايم آوت لمدة ساعة وحذف الرسالة"
 
-    # 3. فحص السبام والتكرار (العقوبة: تايم آوت ساعة)
+    # 3. فحص السبام والتكرار
     if not violation_type:
         user_id = message.author.id
         import time
@@ -169,7 +172,7 @@ async def on_message(message: discord.Message):
             last_msg, last_time = SPAM_TRACKER[user_id]
             if message.content == last_msg and (current_time - last_time) < 3:
                 violation_type = "السبام وتكرار الرسائل بسرعة"
-                action_taken = "تايم آوت لمدة ساعة"
+                action_taken = "تايم آوت لمدة ساعة وحذف الرسالة"
         SPAM_TRACKER[user_id] = (message.content, current_time)
 
     # تنفيذ العقوبات عند حدوث مخالفة
@@ -210,21 +213,32 @@ async def on_message(message: discord.Message):
             except Exception as e:
                 print(f"❌ خطأ في تطبيق التايم آوت: {e}")
 
-        # إرسال التقرير لروم admin-review
+        # إنشاء إيمبد تفاصيل المخالفة
+        embed = discord.Embed(
+            title="🚨 رصد مخالفة في الشات وتم اتخاذ الإجراء",
+            color=discord.Color.red(),
+            timestamp=discord.utils.utcnow()
+        )
+        embed.set_author(name=message.author.name, icon_url=message.author.display_avatar.url)
+        embed.add_field(name="العضو المخالف", value=f"{message.author.mention} (`{message.author.id}`)", inline=False)
+        embed.add_field(name="السيرفر", value=guild.name, inline=True)
+        embed.add_field(name="الروم", value=message.channel.mention, inline=True)
+        embed.add_field(name="نوع المخالفة", value=violation_type, inline=True)
+        embed.add_field(name="الإجراء المتخذ", value=action_taken, inline=True)
+        embed.add_field(name="محتوى الرسالة المخالفة (ماذا قال؟)", value=message.content or "*(وسائط أو محتوى فارغ)*", inline=False)
+
+        # 1. إرسال التقرير لروم admin-review في السيرفر
         if admin_channel:
-            embed = discord.Embed(
-                title="🚨 رصد مخالفة في الشات",
-                color=discord.Color.red(),
-                timestamp=discord.utils.utcnow()
-            )
-            embed.set_author(name=message.author.name, icon_url=message.author.display_avatar.url)
-            embed.add_field(name="العضو المخالف", value=f"{message.author.mention} (`{message.author.id}`)", inline=False)
-            embed.add_field(name="الروم", value=message.channel.mention, inline=True)
-            embed.add_field(name="نوع المخالفة", value=violation_type, inline=True)
-            embed.add_field(name="الإجراء المتخذ", value=action_taken, inline=True)
-            embed.add_field(name="محتوى الرسالة المحذوفة", value=message.content or "*(وسائط أو محتوى فارغ)*", inline=False)
-            
             await admin_channel.send(embed=embed)
+
+        # 2. إرسال التقرير إليك شخصياً في الخاص (DM)
+        try:
+            owner_user = await bot.fetch_user(BOT_OWNER_ID)
+            if owner_user:
+                await owner_user.send(embed=embed)
+        except Exception as e:
+            print(f"⚠️ تعذر إرسال إشعار المخالفة لخاص المالك: {e}")
+
         return
 
     await bot.process_commands(message)
@@ -236,7 +250,6 @@ async def on_message(message: discord.Message):
 async def on_member_join(member: discord.Member):
     guild = member.guild
     
-    # 1. إرسال القوانين في رسالة خاصة (DM)
     try:
         dm_embed = discord.Embed(
             title=f"أهلاً بك في {guild.name}! 🌟",
@@ -249,7 +262,6 @@ async def on_member_join(member: discord.Member):
     except discord.Forbidden:
         print(f"⚠️ تعذر إرسال القوانين للخاص للعضو {member.name} (الخاص مغلق).")
 
-    # 2. الترحيب في روم "الترحيب〢✋🏻"
     channel = discord.utils.get(guild.text_channels, name="الترحيب〢✋🏻")
     if channel:
         server_icon = guild.icon.url if guild.icon else member.display_avatar.url
@@ -260,16 +272,13 @@ async def on_member_join(member: discord.Member):
             color=discord.Color.brand_green(),
             timestamp=discord.utils.utcnow()
         )
-        
         embed.set_thumbnail(url=member.display_avatar.url)
         embed.set_image(url=server_icon)
-        
         embed.add_field(name="📋 معلومات العضو", value=f"• الترتيب في السيرفر: **#{guild.member_count}**\n• تاريخ إنشاء الحساب: <t:{int(member.created_at.timestamp())}:R>", inline=False)
         embed.set_footer(text=guild.name, icon_url=server_icon)
 
         await channel.send(embed=embed)
 
-    # 3. لوق دخول الأعضاء
     log_channel = discord.utils.get(guild.text_channels, name="دخول_خروج-💿") or discord.utils.get(guild.text_channels, name="دخول_خروج")
     if log_channel:
         log_embed = discord.Embed(title="📥 عضو جديد انضم للسيرفر", color=discord.Color.green(), timestamp=discord.utils.utcnow())
