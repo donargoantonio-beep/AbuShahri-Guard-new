@@ -166,7 +166,6 @@ async def on_message(message: discord.Message):
 
         async with message.channel.typing():
             try:
-                # تخصيص السياق الذكي للـ AI ليفهم أنه مساعد لتطوير ميزات البوت
                 system_prompt = (
                     "أنت مساعد ذكي ومطور خبير للبوت الخاص بالسيرفر. اسم الروم Ai ymym وتساعد المالك في تطوير "
                     "وتحسين ميزات البوت (مثل الرومات الصوتية المستمرة، وأوامر الإدارة، وأنظمة الحماية). "
@@ -377,12 +376,10 @@ async def setup_ai_room_only(interaction: discord.Interaction):
     await interaction.response.defer(ephemeral=True)
     guild = interaction.guild
 
-    # إنشاء رتبة Ai ymym إذا لم تكن موجودة
     ai_role = discord.utils.get(guild.roles, name="Ai ymym")
     if not ai_role:
         ai_role = await guild.create_role(name="Ai ymym", color=discord.Color.teal())
 
-    # إنشاء روم الذكاء الاصطناعي المخصص
     ai_channel_name = "💭〢ai-ymym-chat"
     ai_channel = discord.utils.get(guild.text_channels, name=ai_channel_name)
     if not ai_channel:
