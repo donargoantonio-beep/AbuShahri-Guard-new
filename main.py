@@ -75,7 +75,7 @@ def is_exempted(member: discord.Member):
             return True
     return False
 
-# ==================== نظام الحماية الصارم لحذف الرومات ====================
+# ==================== نظام الحماية الشامل ضد النيوك والتخريب ====================
 
 @bot.event
 async def on_guild_channel_delete(channel: discord.abc.GuildChannel):
@@ -109,33 +109,69 @@ async def on_guild_channel_delete(channel: discord.abc.GuildChannel):
         try:
             member = guild.get_member(attacker.id)
             if member:
-                jail_role = discord.utils.get(guild.roles, name="قوانين-الحجر")
-                if not jail_role:
-                    jail_role = await guild.create_role(name="قوانين-الحجر", color=discord.Color.dark_grey())
-                    
-                jail_channel = discord.utils.get(guild.text_channels, name="quarantine-zone")
-                if not jail_channel:
-                    overwrites = {
-                        guild.default_role: discord.PermissionOverwrite(view_channel=False),
-                        jail_role: discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True)
-                    }
-                    jail_channel = await guild.create_text_channel("quarantine-zone", overwrites=overwrites)
-                else:
-                    await jail_channel.set_permissions(jail_role, view_channel=True, send_messages=True, read_message_history=True)
-                    await jail_channel.set_permissions(guild.default_role, view_channel=False)
-
-                saved_roles[member.id] = [r for r in member.roles if r != guild.default_role and r != jail_role]
-                await member.edit(roles=[jail_role], reason="حذف روم بدون صلاحية")
-
-                log_delete = discord.utils.get(guild.text_channels, name="لوق_الحذف-💿") or discord.utils.get(guild.text_channels, name="لوق_الحذف")
-                if log_delete:
-                    embed = discord.Embed(title="🚨 حذف روم غير مصرح به", color=discord.Color.red())
-                    embed.add_field(name="المخالف", value=member.mention, inline=False)
-                    embed.add_field(name="الروم المحذوف", value=channel.name, inline=False)
-                    embed.description = "تمت معاقبته وتحويله للحجر وإعادة إنشاء الروم تلقائياً."
-                    await log_delete.send(embed=embed)
+                await punish_saboteur(member, "حذف روم بدون صلاحية")
         except Exception as e:
             print(f"❌ خطأ أثناء معاقبة المخالف: {e}")
+
+@bot.event
+async def on_guild_channel_update(before: discord.abc.GuildChannel, after: discord.abc.GuildChannel):
+    guild = after.guild
+    attacker = None
+    
+    await asyncio.sleep(0.5)
+    try:
+        async for entry in guild.audit_logs(limit=3, action=discord.AuditLogAction.channel_update):
+            if entry.target and entry.target.id == after.id:
+                attacker = entry.user
+                break
+    except Exception as e:
+        print(f"⚠️ خطأ في قراءة سجلات تعديل الرومات: {e}")
+
+    if attacker and (attacker.bot or is_exempted(attacker)):
+        return
+
+    # الحماية من العبث الخطير بالصلاحيات (وضع @everyone غير مرئي أو ممنوع من الكتابة بالكامل بشكل تخريبي)
+    try:
+        if before.overwrites != after.overwrites:
+            # إعادة الصلاحيات القديمة للحماية
+            await after.edit(overwrites=before.overwrites, reason="محاولة تخريب الصلاحيات")
+            if attacker:
+                member = guild.get_member(attacker.id)
+                if member:
+                    await punish_saboteur(member, "تخريب صلاحيات الرومات")
+    except Exception as e:
+        print(f"❌ خطأ في معالجة تعديل الروم: {e}")
+
+async def punish_saboteur(member: discord.Member, reason: str):
+    guild = member.guild
+    try:
+        jail_role = discord.utils.get(guild.roles, name="قوانين-الحجر")
+        if not jail_role:
+            jail_role = await guild.create_role(name="قوانين-الحجر", color=discord.Color.dark_grey())
+            
+        jail_channel = discord.utils.get(guild.text_channels, name="quarantine-zone")
+        if not jail_channel:
+            overwrites = {
+                guild.default_role: discord.PermissionOverwrite(view_channel=False),
+                jail_role: discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True)
+            }
+            jail_channel = await guild.create_text_channel("quarantine-zone", overwrites=overwrites)
+        else:
+            await jail_channel.set_permissions(jail_role, view_channel=True, send_messages=True, read_message_history=True)
+            await jail_channel.set_permissions(guild.default_role, view_channel=False)
+
+        saved_roles[member.id] = [r for r in member.roles if r != guild.default_role and r != jail_role]
+        await member.edit(roles=[jail_role], reason=reason)
+
+        log_channel = discord.utils.get(guild.text_channels, name="لوق_الحذف-💿") or discord.utils.get(guild.text_channels, name="admin-review")
+        if log_channel:
+            embed = discord.Embed(title="🚨 تم رصد محاولة تخريب (نيوك / عبث)", color=discord.Color.red())
+            embed.add_field(name="المخالف", value=member.mention, inline=False)
+            embed.add_field(name="السبب", value=reason, inline=False)
+            embed.description = "تمت معاقبته وتحويله للحجر تلقائياً وإلغاء التخريب."
+            await log_channel.send(embed=embed)
+    except Exception as e:
+        print(f"❌ خطأ في معاقبة المخالف: {e}")
 
 
 # ==================== نظام المراقبة والتفاعل الذكي عبر Gemini ====================
@@ -168,8 +204,8 @@ async def on_message(message: discord.Message):
         async with message.channel.typing():
             try:
                 system_prompt = (
-                    "أنت مساعد ذكي ومطور خبير للبوت الخاص بالسيرفر. اسم الروم Ai ymym وتساعد المالك في تطوير "
-                    "وتحسين ميزات البوت (مثل الرومات الصوتية المستمرة، وأوامر الإدارة، وأنظمة الحماية). "
+                    "أنت مساعد ذكي ومطور خبير للبوت الخاص بالسيرفر. اسم الروم Ai ymym وتساعد المالك (أبو شهري) في تطوير "
+                    "وتحسين ميزات البوت (مثل الرومات الصوتية المستمرة، وأوامر الإدارة، وأنظمة الحماية ضد النيوك والتخريب). "
                     "أجب باحترافية وبشكل مفيد جداً للمستخدم."
                 )
                 
@@ -247,7 +283,7 @@ async def on_message(message: discord.Message):
                     await jail_channel.set_permissions(guild.default_role, view_channel=False)
 
                 saved_roles[message.author.id] = [r for r in message.author.roles if r != guild.default_role and r != jail_role]
-                await message.author.edit(roles=[jail_role], reason="استخدام ألفاظ نابية / سب والشتم")
+                await message.author.edit(roles=[jail_role], reason="استخدام ألفاظ نابية / سب وشتم")
             except Exception as e:
                 print(f"❌ خطأ في تطبيق الحجر: {e}")
         else:
