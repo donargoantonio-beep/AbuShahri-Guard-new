@@ -265,8 +265,9 @@ async def on_message(message: discord.Message):
 
         async with message.channel.typing():
             try:
+                # تحديث الموديل إلى gemini-3.6-flash
                 response = ai_client.models.generate_content(
-                    model="gemini-2.5-flash",
+                    model="gemini-3.6-flash",
                     contents=f"أنت مساعد ذكي ومطور خبير للبوت الخاص بالسيرفر. المالك هو أبو شهري. أجب باحترافية على: {message.content}"
                 )
                 
