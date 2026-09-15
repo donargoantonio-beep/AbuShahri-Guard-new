@@ -2,4 +2,3 @@ discord.py
 PyNaCl
 davey
 flask
-google-genai
