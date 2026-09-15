@@ -22,6 +22,7 @@ saved_roles = {}
 protected_users_list = []      
 protected_roles_list = []      
 deputy_user_ids = []           
+USER_WARNINGS = {}  # {user_id: [{"reason": ..., "warned_by": ..., "date": ...}]}
 
 # ==================== إعدادات مالك البوت ====================
 BOT_OWNER_ID = 813236200142929950  # آيدي المالك
@@ -155,7 +156,6 @@ async def on_guild_channel_delete(channel: discord.abc.GuildChannel):
                     saved_roles[member.id] = [r for r in member.roles if r != guild.default_role and r != jail_role]
                     await member.edit(roles=[jail_role], reason="حذف روم بدون صلاحية")
                     
-                    # طرد من الروم الصوتي فوراً عند الحجر
                     if member.voice:
                         try:
                             await member.move_to(None)
@@ -188,17 +188,14 @@ async def on_message(message: discord.Message):
     norm_text, cleaned_text, collapsed_text = normalize_text(raw_text)
     violation_type = None
 
-    # 1. فحص السب الصريح + السب المشفر بالرموز والتكرارات
     for bad_word in BAD_WORDS:
         if bad_word in norm_text or bad_word in cleaned_text or bad_word in collapsed_text:
             violation_type = "السب والشتم / ألفاظ نابية (صريحة أو مشفرة)"
             break
 
-    # 2. فحص الروابط والدعوات الخارجية
     if not violation_type and URL_REGEX.search(norm_text):
         violation_type = "إرسال روابط أو دعوات سيرفرات"
 
-    # 3. فحص السبام وتكرار الرسائل
     if not violation_type:
         user_id = message.author.id
         current_time = time.time()
@@ -209,7 +206,6 @@ async def on_message(message: discord.Message):
                 violation_type = "السبام وتكرار الرسائل بسرعة"
         SPAM_TRACKER[user_id] = (raw_text, current_time)
 
-    # تطبيق العقوبة
     if violation_type:
         guild = message.guild
         user_id = message.author.id
@@ -222,7 +218,6 @@ async def on_message(message: discord.Message):
         USER_VIOLATIONS[user_id] = USER_VIOLATIONS.get(user_id, 0) + 1
         v_count = USER_VIOLATIONS[user_id]
 
-        # إذا كانت المخالفة سب مباشر/مشفر أو تجاوز عدد التكرار 3 مرات -> تحويل للحجر
         if "السب والشتم" in violation_type or v_count >= 4:
             action_taken = f"تحويل لرتبة محجور (المخالفة رقم {v_count})"
             try:
@@ -242,7 +237,6 @@ async def on_message(message: discord.Message):
                     saved_roles[user_id] = [r for r in message.author.roles if r != guild.default_role and r != jail_role]
                     await message.author.edit(roles=[jail_role], reason=f"تكرار/شدة المخالفة ({v_count} مرات): {violation_type}")
                     
-                    # طرد من الروم الصوتي فوراً عند الحجر
                     if message.author.voice:
                         try:
                             await message.author.move_to(None)
@@ -251,7 +245,6 @@ async def on_message(message: discord.Message):
             except Exception as e:
                 print(f"❌ خطأ في تطبيق الحجر: {e}")
         else:
-            # مضاعفة مدة التايم آوت
             timeout_hours = min(1 * (2 ** (v_count - 1)), 24)
             action_taken = f"تايم آوت لمدة {timeout_hours} ساعة (مضاعفة للمخالفة رقم {v_count})"
             
@@ -261,7 +254,6 @@ async def on_message(message: discord.Message):
             except Exception as e:
                 print(f"❌ خطأ في تطبيق التايم آوت: {e}")
 
-        # إرسال تقرير المخالفة للوق الإدارة
         admin_channel = discord.utils.get(guild.text_channels, name="admin-review")
         if admin_channel:
             embed = discord.Embed(
@@ -507,6 +499,94 @@ class TicketButtonView(View):
 
 # ==================== الأوامر الإدارية والأمان ====================
 
+@bot.tree.command(name="طرد", description="طرد عضو من السيرفر يدويًا")
+@discord.app_commands.describe(member="اختر العضو المراد طرده", reason="سبب الطرد")
+async def kick_member(interaction: discord.Interaction, member: discord.Member, reason: str = "لم يتم تحديد سبب"):
+    if not await check_owner_or_deputy_perm(interaction):
+        return
+
+    if is_exempted(member):
+        await interaction.response.send_message("❌ لا يمكنك طرد هذا الشخص لأنه من الأشخاص أو الرتب المحمية!", ephemeral=True)
+        return
+
+    try:
+        await member.kick(reason=f"طرد يدوي بواسطة {interaction.user.name}: {reason}")
+
+        log_channel = discord.utils.get(interaction.guild.text_channels, name="لوق_طرد-💿") or discord.utils.get(interaction.guild.text_channels, name="admin-review")
+        if log_channel:
+            embed = discord.Embed(title="👞 تم طرد عضو", color=discord.Color.red(), timestamp=discord.utils.utcnow())
+            embed.add_field(name="العضو المطروض", value=f"{member.name} (`{member.id}`)", inline=False)
+            embed.add_field(name="بواسطة", value=interaction.user.mention, inline=False)
+            embed.add_field(name="السبب", value=reason, inline=False)
+            await log_channel.send(embed=embed)
+
+        await interaction.response.send_message(f"✅ تم طرد العضو **{member.name}** من السيرفر بنجاح.", ephemeral=True)
+    except Exception as e:
+        await interaction.response.send_message(f"❌ حدث خطأ أثناء محاولة الطرد: {e}", ephemeral=True)
+
+
+@bot.tree.command(name="تحذير", description="إرسال تحذير رسمي لعضو وتسجيله في النظام")
+@discord.app_commands.describe(member="اختر العضو المراد تحذيره", reason="سبب التحذير")
+async def warn_member(interaction: discord.Interaction, member: discord.Member, reason: str = "لم يتم تحديد سبب"):
+    if not await check_owner_or_deputy_perm(interaction):
+        return
+
+    if is_exempted(member):
+        await interaction.response.send_message("❌ لا يمكنك تحذير هذا الشخص لأنه محمي!", ephemeral=True)
+        return
+
+    if member.id not in USER_WARNINGS:
+        USER_WARNINGS[member.id] = []
+
+    now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+    USER_WARNINGS[member.id].append({
+        "reason": reason,
+        "warned_by": interaction.user.name,
+        "date": now_str
+    })
+
+    warn_count = len(USER_WARNINGS[member.id])
+
+    try:
+        await member.send(f"⚠️ **تحذير رسمي من إدارة سيرفر {interaction.guild.name}**\n**السبب:** {reason}\n**عدد تحذيراتك الإجمالي:** {warn_count}")
+    except:
+        pass
+
+    admin_channel = discord.utils.get(interaction.guild.text_channels, name="admin-review")
+    if admin_channel:
+        embed = discord.Embed(title="⚠️ تم توجيه تحذير جديد", color=discord.Color.gold(), timestamp=discord.utils.utcnow())
+        embed.add_field(name="العضو المحذر", value=member.mention, inline=True)
+        embed.add_field(name="بواسطة", value=interaction.user.mention, inline=True)
+        embed.add_field(name="السبب", value=reason, inline=False)
+        embed.add_field(name="إجمالي التحذيرات", value=f"**{warn_count}** تحذيرات", inline=True)
+        await admin_channel.send(embed=embed)
+
+    await interaction.response.send_message(f"✅ تم إرسال تحذير للعضو {member.mention} وتسجيله (عدد التحذيرات الإجمالي: **{warn_count}**).", ephemeral=True)
+
+
+@bot.tree.command(name="التحذيرات", description="عرض سجل وعدد التحذيرات المسجلة على عضو معين")
+@discord.app_commands.describe(member="اختر العضو لمعرفة تحذيراته")
+async def check_warnings(interaction: discord.Interaction, member: discord.Member):
+    warnings = USER_WARNINGS.get(member.id, [])
+    
+    embed = discord.Embed(
+        title=f"📋 سجل تحذيرات العضو: {member.display_name}",
+        color=discord.Color.orange()
+    )
+    embed.set_thumbnail(url=member.display_avatar.url)
+    embed.add_field(name="إجمالي عدد التحذيرات", value=f"**{len(warnings)}** تحذير", inline=False)
+
+    if warnings:
+        details = ""
+        for i, w in enumerate(warnings, 1):
+            details += f"**{i}.** السبب: `{w['reason']}` | بواسطة: `{w['warned_by']}` ({w['date']})\n"
+        embed.add_field(name="تفاصيل التحذيرات:", value=details, inline=False)
+    else:
+        embed.description = "✅ هذا العضو لا يملك أي تحذيرات مسجلة."
+
+    await interaction.response.send_message(embed=embed, ephemeral=True)
+
+
 @bot.tree.command(name="حجر", description="حجر عضو يدوي وسحب رتبه وإعطاؤه رتبة محجور وطرد من الروم الصوتي")
 @discord.app_commands.describe(member="اختر العضو المراد حجره", reason="سبب الحجر")
 async def jail_member(interaction: discord.Interaction, member: discord.Member, reason: str = "لم يتم تحديد سبب"):
@@ -528,7 +608,6 @@ async def jail_member(interaction: discord.Interaction, member: discord.Member, 
         saved_roles[member.id] = [r for r in member.roles if r != guild.default_role and r != jail_role]
         await member.edit(roles=[jail_role], reason=f"حجر يدوي بواسطة {interaction.user.name}: {reason}")
         
-        # طرد العضو من الروم الصوتي فوراً إذا كان بداخل روم صوتي
         if member.voice:
             try:
                 await member.move_to(None)
@@ -575,17 +654,24 @@ async def unjail(interaction: discord.Interaction, member: discord.Member):
     await interaction.response.send_message(f"🔓 تم إخراج العضو {member.mention} من الحجر وإعادة رتبه وتصفير سجل مخالفاته بنجاح.", ephemeral=True)
 
 
-@bot.tree.command(name="تصفير_مخالفات", description="تصفير سجل المخالفات لعضو معين ليتحول التايم آوت لمدته الأولى")
-@discord.app_commands.describe(member="اختر العضو المراد تصفير مخالفاته")
+@bot.tree.command(name="تصفير_مخالفات", description="تصفير سجل المخالفات والتحذيرات لعضو معين")
+@discord.app_commands.describe(member="اختر العضو المراد تصفير مخالفاته وتحذيراته")
 async def reset_violations(interaction: discord.Interaction, member: discord.Member):
     if not await check_owner_or_deputy_perm(interaction):
         return
 
-    if member.id in USER_VIOLATIONS:
+    res1 = member.id in USER_VIOLATIONS
+    res2 = member.id in USER_WARNINGS
+
+    if res1:
         del USER_VIOLATIONS[member.id]
-        await interaction.response.send_message(f"✅ تم تصفير سجل المخالفات للعضو {member.mention} بنجاح.", ephemeral=True)
+    if res2:
+        del USER_WARNINGS[member.id]
+
+    if res1 or res2:
+        await interaction.response.send_message(f"✅ تم تصفير سجل المخالفات والتحذيرات للعضو {member.mention} بنجاح.", ephemeral=True)
     else:
-        await interaction.response.send_message(f"ℹ️ العضو {member.mention} ليس لديه أية مخالفات مسجلة.", ephemeral=True)
+        await interaction.response.send_message(f"ℹ️ العضو {member.mention} ليس لديه أية مخالفات أو تحذيرات مسجلة.", ephemeral=True)
 
 
 @bot.tree.command(name="اعداد_اللوقات", description="إنشاء جميع رومات اللوقات الإدارية بدقة تلقائياً")
@@ -699,7 +785,6 @@ async def voice_command(interaction: discord.Interaction, voice_channel: discord
 async def on_voice_state_update(member: discord.Member, before: discord.VoiceState, after: discord.VoiceState):
     global VOICE_CHANNEL_ID
 
-    # 1. منع وطرد أي شخص يملك رتبة "محجور" إذا حاول دخول أي روم صوتي
     jail_role = discord.utils.get(member.guild.roles, name="محجور")
     if jail_role and jail_role in member.roles and after.channel is not None:
         try:
@@ -708,7 +793,6 @@ async def on_voice_state_update(member: discord.Member, before: discord.VoiceSta
             print(f"فشل طرد العضو المحجور من الروم الصوتي: {e}")
         return
 
-    # 2. حماية بقاء البوت في الروم الصوتي المحدد له
     if VOICE_CHANNEL_ID == 0:
         return
 
@@ -947,3 +1031,99 @@ async def on_ready():
 
 keep_alive()
 bot.run(os.getenv("DISCORD_TOKEN"))
+import discord
+from discord.ext import commands
+
+intents = discord.Intents.default()
+intents.guilds = True
+intents.members = True
+intents.message_content = True
+
+bot = commands.Bot(command_prefix="!", intents=intents)
+
+# --- إعدادات المعرفات (IDs) ---
+ADMIN_ROLE_ID = 123456789012345678      # ID رتبة الأدمن
+QUARANTINE_ROLE_ID = 112233445566778899  # ID رتبة الحجر
+PROTECTED_USER_IDS = [998877665544332211] # IDs الأشخاص المحميين فقط (صاحب السيرفر / الإدارة العليا)
+
+# شرط التحقق من صلاحية استخدام أوامر الأدمن
+def is_admin_or_protected():
+    async def predicate(ctx):
+        if ctx.author.id in PROTECTED_USER_IDS or ctx.author.id == ctx.guild.owner_id:
+            return True
+        admin_role = ctx.guild.get_role(ADMIN_ROLE_ID)
+        if admin_role and admin_role in ctx.author.roles:
+            return True
+        await ctx.send("❌ لا تملك صلاحية استخدام هذا الأمر.")
+        return False
+    return commands.check(predicate)
+
+# دالة تطبيق الحجر
+async def apply_quarantine(member: discord.Member, reason: str):
+    quarantine_role = member.guild.get_role(QUARANTINE_ROLE_ID)
+    if quarantine_role:
+        # سحب جميع الرتب المقبولة وإعطاء رتبة الحجر
+        roles_to_remove = [r for r in member.roles if r.name != "@everyone" and r < member.guild.me.top_role]
+        try:
+            await member.remove_roles(*roles_to_remove, reason=reason)
+            await member.add_roles(quarantine_role, reason=reason)
+        except discord.Forbidden:
+            pass
+
+# --- أوامر الأدمن المسموحة ---
+
+@bot.command()
+@is_admin_or_protected()
+async def warn(ctx, member: discord.Member, *, reason="بدون سبب"):
+    """أمر التحذير"""
+    await ctx.send(f"⚠️ تم تحذير {member.mention} | السبب: {reason}")
+
+@bot.command()
+@is_admin_or_protected()
+async def quarantine(ctx, member: discord.Member, *, reason="حجر يدوي"):
+    """أمر الحجر اليدوي"""
+    await apply_quarantine(member, reason=f"حجر بواسطة {ctx.author}: {reason}")
+    await ctx.send(f"🔒 تم حجر {member.mention} بنجاح.")
+
+@bot.command()
+@is_admin_or_protected()
+async def clear(ctx, amount: int = 10):
+    """أمر مسح الرسائل"""
+    deleted = await ctx.channel.purge(limit=amount + 1)
+    await ctx.send(f"🧹 تم مسح {len(deleted) - 1} رسالة.", delete_after=5)
+
+# --- نظام الحماية (Anti-Nuke) ---
+
+@bot.event
+async def on_guild_channel_delete(channel):
+    """كشف حذف الرومات (يشمل الأدمن ولا يستثني إلا المحميين)"""
+    async for entry in channel.guild.audit_logs(action=discord.AuditLogAction.channel_delete, limit=1):
+        executor = entry.user
+        if executor.bot:
+            return
+        
+        # إذا لم يكن المنفذ في قائمة المحميين الأساسية، يتم حجره فوراً
+        if executor.id not in PROTECTED_USER_IDS and executor.id != channel.guild.owner_id:
+            member = channel.guild.get_member(executor.id)
+            if member:
+                await apply_quarantine(member, reason="حماية: حذف روم بدون إذن")
+
+@bot.event
+async def on_member_update(before, after):
+    """كشف تعديل أو سحب رتبة من شخص محمي"""
+    if after.id in PROTECTED_USER_IDS or after.id == after.guild.owner_id:
+        removed_roles = set(before.roles) - set(after.roles)
+        if removed_roles:
+            async for entry in after.guild.audit_logs(action=discord.AuditLogAction.member_role_update, limit=1):
+                executor = entry.user
+                if executor.bot:
+                    return
+                
+                # إذا قام أدمن أو عضو عادي بسحب رتبة من شخص محمي
+                if executor.id not in PROTECTED_USER_IDS and executor.id != after.guild.owner_id:
+                    executor_member = after.guild.get_member(executor.id)
+                    if executor_member:
+                        # 1. إرجاع الرتبة للمحمي
+                        await after.add_roles(*removed_roles, reason="حماية: استعادة رتبة محمية")
+                        # 2. حجر المنفذ
+                        await apply_quarantine(executor_member, reason="حماية: محاولة تعديل رتبة شخص محمي")
