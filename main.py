@@ -16,8 +16,8 @@ intents.moderation = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-# تهيئة عميل الذكاء الاصطناعي مع مفتاح Gemini
-ai_client = genai.Client(api_key="AIzaSyA8U0XlD...") 
+# تهيئة عميل الذكاء الاصطناعي مع مفتاح Gemini من متغيرات البيئة في ريندر
+ai_client = genai.Client(api_key=os.getenv("GEMINI_API_KEY")) 
 
 saved_roles = {}
 protected_users_list = []      
