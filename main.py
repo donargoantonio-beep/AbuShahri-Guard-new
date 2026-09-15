@@ -1,4 +1,4 @@
-Import os
+import os
 import re
 import time
 import asyncio
@@ -24,8 +24,9 @@ protected_roles_list = []
 deputy_user_ids = []           
 USER_WARNINGS = {}  # {user_id: [{"reason": ..., "warned_by": ..., "date": ...}]}
 
-# ==================== إعدادات مالك البوت ====================
+# ==================== إعدادات المالك والأدمن ====================
 BOT_OWNER_ID = 813236200142929950  # آيدي المالك
+ADMIN_ROLE_NAME = "أدمن"           # اسم رتبة الأدمن
 # ========================================================
 
 VOICE_CHANNEL_ID = 0  
@@ -96,7 +97,34 @@ async def check_owner_or_deputy_perm(interaction: discord.Interaction):
     )
     return False
 
+
+def is_admin(member: discord.Member) -> bool:
+    """التحقق مما إذا كان العضو يحمل رتبة أدمن"""
+    admin_role = discord.utils.get(member.guild.roles, name=ADMIN_ROLE_NAME)
+    return admin_role in member.roles if admin_role else False
+
+
+async def check_admin_perm(interaction: discord.Interaction):
+    """فحص الصلاحيات المخصصة للأدمن والمالك والنواب (مثل التحذير والحجر والمسح)"""
+    if interaction.user.id == BOT_OWNER_ID or interaction.user.id in deputy_user_ids:
+        return True
+    if BOT_OWNER_ID == 0 and interaction.user.id == interaction.guild.owner_id:
+        return True
+    if is_admin(interaction.user):
+        return True
+    
+    await interaction.response.send_message(
+        "❌ عذراً، هذه الصلاحية مخصصة للإدارة (رتبة أدمن) والنواب ومالك البوت فقط.", 
+        ephemeral=True
+    )
+    return False
+
+
 def is_exempted(member: discord.Member):
+    """
+    ملاحظة هامّة: رتبة 'أدمن' ليست ضمن الحصانة (Exempted)
+    بحيث لو قام الأدمن بحذف روم أو تخريب يتم حجره ومعاقبته فوراً.
+    """
     if member.id == BOT_OWNER_ID or member.id in deputy_user_ids or member.id == member.guild.owner_id:
         return True
     if member.id in protected_users_list:
@@ -123,6 +151,7 @@ async def on_guild_channel_delete(channel: discord.abc.GuildChannel):
     except Exception as e:
         print(f"⚠️ خطأ أثناء قراءة سجلات الحذف: {e}")
 
+    # إذا كان الحاذف أدمن (ليس المالك/النائب/محمي)، سيتم حجره تلقائياً
     if attacker and (attacker.bot or is_exempted(attacker)):
         return
 
@@ -499,7 +528,7 @@ class TicketButtonView(View):
 
 # ==================== الأوامر الإدارية والأمان ====================
 
-@bot.tree.command(name="طرد", description="طرد عضو من السيرفر يدويًا")
+@bot.tree.command(name="طرد", description="طرد عضو من السيرفر يدويًا (خاص بالمالك والنواب)")
 @discord.app_commands.describe(member="اختر العضو المراد طرده", reason="سبب الطرد")
 async def kick_member(interaction: discord.Interaction, member: discord.Member, reason: str = "لم يتم تحديد سبب"):
     if not await check_owner_or_deputy_perm(interaction):
@@ -525,10 +554,11 @@ async def kick_member(interaction: discord.Interaction, member: discord.Member, 
         await interaction.response.send_message(f"❌ حدث خطأ أثناء محاولة الطرد: {e}", ephemeral=True)
 
 
-@bot.tree.command(name="تحذير", description="إرسال تحذير رسمي لعضو وتسجيله في النظام")
+@bot.tree.command(name="تحذير", description="إرسال تحذير رسمي لعضو وتسجيله في النظام (متاح للأدمن)")
 @discord.app_commands.describe(member="اختر العضو المراد تحذيره", reason="سبب التحذير")
 async def warn_member(interaction: discord.Interaction, member: discord.Member, reason: str = "لم يتم تحديد سبب"):
-    if not await check_owner_or_deputy_perm(interaction):
+    # الصلاحية متاحة للأدمن، النواب والمالك
+    if not await check_admin_perm(interaction):
         return
 
     if is_exempted(member):
@@ -587,10 +617,11 @@ async def check_warnings(interaction: discord.Interaction, member: discord.Membe
     await interaction.response.send_message(embed=embed, ephemeral=True)
 
 
-@bot.tree.command(name="حجر", description="حجر عضو يدوي وسحب رتبه وإعطاؤه رتبة محجور وطرد من الروم الصوتي")
+@bot.tree.command(name="حجر", description="حجر عضو يدوي وسحب رتبه وإعطاؤه رتبة محجور (متاح للأدمن)")
 @discord.app_commands.describe(member="اختر العضو المراد حجره", reason="سبب الحجر")
 async def jail_member(interaction: discord.Interaction, member: discord.Member, reason: str = "لم يتم تحديد سبب"):
-    if not await check_owner_or_deputy_perm(interaction):
+    # الصلاحية متاحة للأدمن، النواب والمالك
+    if not await check_admin_perm(interaction):
         return
 
     if is_exempted(member):
@@ -710,13 +741,17 @@ async def setup_logs(interaction: discord.Interaction):
     await interaction.followup.send(f"✅ تم إنشاء رومات اللوقات بنجاح داخل قسم `سجلات الإدارة || 💿` وعددها المستحدثة: {created_count}", ephemeral=True)
 
 
-@bot.tree.command(name="اعداد_الرومات_الاساسيه", description="إعداد رومات النظام الأساسية والتذاكر والتقديم تلقائياً")
+@bot.tree.command(name="اعداد_الرومات_الاساسيه", description="إعداد رومات النظام الأساسية والتذاكر والتقديم ورتبة الأدمن تلقائياً")
 async def setup(interaction: discord.Interaction):
     if not await check_owner_or_deputy_perm(interaction):
         return
 
     await interaction.response.defer(ephemeral=True)
     guild = interaction.guild
+
+    # إنشاء رتبة الأدمن تلقائياً
+    if not discord.utils.get(guild.roles, name=ADMIN_ROLE_NAME):
+        await guild.create_role(name=ADMIN_ROLE_NAME, color=discord.Color.red())
 
     if not discord.utils.get(guild.roles, name="مسؤول-التذاكر"):
         await guild.create_role(name="مسؤول-التذاكر", color=discord.Color.blue())
@@ -760,7 +795,7 @@ async def setup(interaction: discord.Interaction):
     embed_apply = discord.Embed(title="التقديم لفريق الإدارة", description="اضغط على الزر أدناه لتعبئة استمارة التقديم.", color=discord.Color.purple())
     await apply_panel.send(embed=embed_apply, view=ApplicationButtonView())
 
-    await interaction.followup.send("✅ تم إعداد رومات النظام والتذاكر والتقديم بنجاح!", ephemeral=True)
+    await interaction.followup.send("✅ تم إعداد رومات النظام والتذاكر ورتبة **أدمن** والتقديم بنجاح!", ephemeral=True)
 
 
 @bot.tree.command(name="روم_صوتي", description="تحديد روم صوتي دائم يدخله البوت تلقائياً ويعود إليه إذا خرج")
@@ -935,10 +970,11 @@ async def protection_dashboard(interaction: discord.Interaction):
     await interaction.response.send_message(embed=embed, ephemeral=True)
 
 
-@bot.tree.command(name="مسح", description="حذف عدد من الرسائل في الروم (الحد الأقصى 100 رسالة)")
+@bot.tree.command(name="مسح", description="حذف عدد من الرسائل في الروم (متاح للأدمن - الحد الأقصى 100 رسالة)")
 @discord.app_commands.describe(amount="عدد الرسائل المراد حذفها (من 1 إلى 100)")
 async def clear_messages(interaction: discord.Interaction, amount: int):
-    if not await check_owner_or_deputy_perm(interaction):
+    # الصلاحية متاحة للأدمن، النواب والمالك
+    if not await check_admin_perm(interaction):
         return
 
     if amount < 1 or amount > 100:
