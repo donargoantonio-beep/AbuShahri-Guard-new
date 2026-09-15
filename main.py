@@ -110,18 +110,48 @@ async def on_guild_channel_delete(channel: discord.abc.GuildChannel):
             print(f"❌ خطأ أثناء معاقبة المخالف: {e}")
 
 
-# ==================== أحداث اللوقات الشاملة (Log Events) ====================
+# ==================== نظام الترحيب التلقائي المطور ====================
 
 @bot.event
 async def on_member_join(member: discord.Member):
-    channel = discord.utils.get(member.guild.text_channels, name="دخول_خروج-💿") or discord.utils.get(member.guild.text_channels, name="دخول_خروج")
-    if channel:
-        embed = discord.Embed(title="📥 عضو جديد انضم للسيرفر", color=discord.Color.green(), timestamp=discord.utils.utcnow())
-        embed.set_thumbnail(url=member.display_avatar.url)
-        embed.add_field(name="العضو", value=f"{member.mention} (`{member.id}`)", inline=False)
-        embed.add_field(name="تاريخ إنشاء الحساب", value=f"<t:{int(member.created_at.timestamp())}:R>", inline=False)
-        embed.set_footer(text=f"عدد الأعضاء الآن: {member.guild.member_count}")
-        await channel.send(embed=embed)
+    guild = member.guild
+    
+    # البحث عن روم الترحيب، وإذا لم يكن موجوداً، يقوم البوت بإنشائه تلقائياً!
+    channel = discord.utils.get(guild.text_channels, name="الترحيب") or discord.utils.get(guild.text_channels, name="welcome")
+    if not channel:
+        try:
+            channel = await guild.create_text_channel("الترحيب")
+        except Exception as e:
+            print(f"❌ لم يتمكن البوت من إنشاء روم الترحيب تلقائياً: {e}")
+            return
+
+    # جلب صورة السيرفر (إذا وجدت) أو استخدام صورة افتراضية
+    server_icon = guild.icon.url if guild.icon else member.display_avatar.url
+
+    embed = discord.Embed(
+        title=f"أهلاً بك في {guild.name}! 🎉",
+        description=f"مرحباً بك {member.mention} في سيرفرنا!\nنحن سعداء جداً بانضمامك إلينا ونتمنى لك قضاء أوقات ممتعة معنا.",
+        color=discord.Color.brand_green(),
+        timestamp=discord.utils.utcnow()
+    )
+    
+    # وضع صورة العضو كأيقونة مصغرة وصورة السيرفر كشعار رئيسي للترفيه والاحترافية
+    embed.set_thumbnail(url=member.display_avatar.url)
+    embed.set_image(url=server_icon)
+    
+    embed.add_field(name="📋 معلومات العضو", value=f"• الترتيب في السيرفر: **#{guild.member_count}**\n• تاريخ إنشاء الحساب: <t:{int(member.created_at.timestamp())}:R>", inline=False)
+    embed.set_footer(text=guild.name, icon_url=server_icon)
+
+    await channel.send(embed=embed)
+
+    # لوق دخول وخروج الأعضاء التقليدي
+    log_channel = discord.utils.get(guild.text_channels, name="دخول_خروج-💿") or discord.utils.get(guild.text_channels, name="دخول_خروج")
+    if log_channel:
+        log_embed = discord.Embed(title="📥 عضو جديد انضم للسيرفر", color=discord.Color.green(), timestamp=discord.utils.utcnow())
+        log_embed.set_thumbnail(url=member.display_avatar.url)
+        log_embed.add_field(name="العضو", value=f"{member.mention} (`{member.id}`)", inline=False)
+        log_embed.set_footer(text=f"عدد الأعضاء الآن: {guild.member_count}")
+        await log_channel.send(embed=log_embed)
 
 @bot.event
 async def on_member_remove(member: discord.Member):
@@ -235,7 +265,6 @@ class AdminDecisionView(View):
         accepted_role = discord.utils.get(guild.roles, name="مسؤول-التقديم")
         if (accepted_role and accepted_role in interaction.user.roles) or is_exempted(interaction.user):
             try:
-                # تم تحديث رسالة الرفض هنا
                 await self.member.send("❌ نأسف لك، تم رفض طلب تقديمك من الإدارة.")
             except:
                 pass
