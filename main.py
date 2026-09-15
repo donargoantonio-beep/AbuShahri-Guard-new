@@ -247,7 +247,7 @@ async def on_message(message: discord.Message):
                     await jail_channel.set_permissions(guild.default_role, view_channel=False)
 
                 saved_roles[message.author.id] = [r for r in message.author.roles if r != guild.default_role and r != jail_role]
-                await message.author.edit(roles=[jail_role], reason="استخدام ألفاظ نابية / سب وشتم")
+                await message.author.edit(roles=[jail_role], reason="استخدام ألفاظ نابية / سب والشتم")
             except Exception as e:
                 print(f"❌ خطأ في تطبيق الحجر: {e}")
         else:
