@@ -173,7 +173,7 @@ async def on_message(message: discord.Message):
                 )
                 
                 response = ai_client.models.generate_content(
-                    model="gemini-2.5-flash",
+                    model="gemini-3.6-flash",
                     contents=f"{system_prompt}\n\nسؤال المستخدم: {message.content}",
                 )
                 ai_reply = response.text
