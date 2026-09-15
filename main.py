@@ -26,25 +26,18 @@ BOT_OWNER_ID = 813236200142929950  # <--- آيديك الأساسي
 
 VOICE_CHANNEL_ID = 0  
 
-# قائمة الكلمات النابية والسب الممنوعة
 BAD_WORDS = ["كلب", "حمار", "قحبة", "زق", "خرا", "شمهور", "يعور", "لعنة", "قحط"] 
 SPAM_TRACKER = {}
 
-# نص القوانين للإرسال بالخاص
-RULES_TEXT = """
-📜 **قوانين وعقوبات سيرفرنا:**
+# نص القوانين المطابق للصلة في الصورة
+RULES_TEXT = """📜 **قوانين وعقوبات السيرفر:**
 
-1. **السب والشتم والألفاظ النابية:**
-   • *العقوبة:* **وضع العضو في الحجر فوراً** مع سحب الرتب المؤقتة وإرسال التقرير للإدارة.
-2. **إرسال الروابط والدعوات الخارجية:**
-   • *العقوبة:* **تايم آوت (Timeout) لمدة ساعة كاملة** + حذف الرسالة.
-3. **السبام وتكرار الرسائل أو الحروف:**
-   • *العقوبة:* **تايم آوت (Timeout) لمدة ساعة كاملة** + حذف الرسالة.
-4. **احترام الجميع وعدم إثارة المشاكل:**
-   • *العقوبة:* تايم آوت لمدة ساعة أو تصعيد العقوبة.
+1. **السب والشتم والألفاظ النابية:** يمنع منعاً باتاً (عقوبة: تحويل لرتبة محجور).
+2. **إرسال الروابط والدعوات الخارجية:** غير مسموح (عقوبة: تايم آوت ساعة).
+3. **السبام وتكرار الرسائل:** غير مسموح (عقوبة: تايم آوت ساعة).
+4. **الاحترام المتبادل:** يرجى احترام جميع الأعضاء لتجنب العقوبات.
 
-يرجى الالتزام التام بالقوانين لتجنب العقوبات الإدارية.
-"""
+نتمنى لك وقتاً ممتعاً معنا! 🌹"""
 
 async def check_owner_or_deputy_perm(interaction: discord.Interaction):
     if interaction.user.id == BOT_OWNER_ID or interaction.user.id in deputy_user_ids:
@@ -102,31 +95,29 @@ async def on_guild_channel_delete(channel: discord.abc.GuildChannel):
         try:
             member = guild.get_member(attacker.id)
             if member:
-                jail_role = discord.utils.get(guild.roles, name="قوانين-الحجر")
-                if not jail_role:
-                    jail_role = await guild.create_role(name="قوانين-الحجر", color=discord.Color.dark_grey())
-                    
-                jail_channel = discord.utils.get(guild.text_channels, name="quarantine-zone")
-                if not jail_channel:
-                    overwrites = {
-                        guild.default_role: discord.PermissionOverwrite(view_channel=False),
-                        jail_role: discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True)
-                    }
-                    jail_channel = await guild.create_text_channel("quarantine-zone", overwrites=overwrites)
-                else:
-                    await jail_channel.set_permissions(jail_role, view_channel=True, send_messages=True, read_message_history=True)
-                    await jail_channel.set_permissions(guild.default_role, view_channel=False)
+                jail_role = discord.utils.get(guild.roles, name="محجور")
+                if jail_role:
+                    jail_channel = discord.utils.get(guild.text_channels, name="quarantine-zone")
+                    if not jail_channel:
+                        overwrites = {
+                            guild.default_role: discord.PermissionOverwrite(view_channel=False),
+                            jail_role: discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True)
+                        }
+                        jail_channel = await guild.create_text_channel("quarantine-zone", overwrites=overwrites)
+                    else:
+                        await jail_channel.set_permissions(jail_role, view_channel=True, send_messages=True, read_message_history=True)
+                        await jail_channel.set_permissions(guild.default_role, view_channel=False)
 
-                saved_roles[member.id] = [r for r in member.roles if r != guild.default_role and r != jail_role]
-                await member.edit(roles=[jail_role], reason="حذف روم بدون صلاحية")
+                    saved_roles[member.id] = [r for r in member.roles if r != guild.default_role and r != jail_role]
+                    await member.edit(roles=[jail_role], reason="حذف روم بدون صلاحية")
 
-                log_delete = discord.utils.get(guild.text_channels, name="لوق_الحذف-💿") or discord.utils.get(guild.text_channels, name="لوق_الحذف")
-                if log_delete:
-                    embed = discord.Embed(title="🚨 حذف روم غير مصرح به", color=discord.Color.red())
-                    embed.add_field(name="المخالف", value=member.mention, inline=False)
-                    embed.add_field(name="الروم المحذوف", value=channel.name, inline=False)
-                    embed.description = "تمت معاقبته وتحويله للحجر وإعادة إنشاء الروم تلقائياً."
-                    await log_delete.send(embed=embed)
+                    log_delete = discord.utils.get(guild.text_channels, name="لوق_الحذف-💿") or discord.utils.get(guild.text_channels, name="لوق_الحذف")
+                    if log_delete:
+                        embed = discord.Embed(title="🚨 حذف روم غير مصرح به", color=discord.Color.red())
+                        embed.add_field(name="المخالف", value=member.mention, inline=False)
+                        embed.add_field(name="الروم المحذوف", value=channel.name, inline=False)
+                        embed.description = "تمت معاقبته وإعطاؤه رتبة محجور وإعادة إنشاء الروم تلقائياً."
+                        await log_delete.send(embed=embed)
         except Exception as e:
             print(f"❌ خطأ أثناء معاقبة المخالف: {e}")
 
@@ -146,20 +137,15 @@ async def on_message(message: discord.Message):
     violation_type = None
     action_taken = None
 
-    # 1. فحص السب والشتم (العقوبة: وضع بالحجر)
-    for word in BAD_WORDS:
-        if word in content_lower:
-            violation_type = "السب والشتم / ألفاظ نابية"
-            action_taken = "وضع العضو في الحجر"
-            break
+    if any(word in content_lower for word in BAD_WORDS):
+        violation_type = "السب والشتم / ألفاظ نابية"
+        action_taken = "إعطاء العضو رتبة محجور"
 
-    # 2. فحص الروابط (العقوبة: تايم آوت ساعة)
     if not violation_type:
         if "http://" in content_lower or "https://" in content_lower or "discord.gg/" in content_lower or "www." in content_lower:
             violation_type = "إرسال روابط غير مصرح بها"
             action_taken = "تايم آوت لمدة ساعة"
 
-    # 3. فحص السبام والتكرار (العقوبة: تايم آوت ساعة)
     if not violation_type:
         user_id = message.author.id
         import time
@@ -172,7 +158,6 @@ async def on_message(message: discord.Message):
                 action_taken = "تايم آوت لمدة ساعة"
         SPAM_TRACKER[user_id] = (message.content, current_time)
 
-    # تنفيذ العقوبات عند حدوث مخالفة
     if violation_type:
         guild = message.guild
         admin_channel = discord.utils.get(guild.text_channels, name="admin-review")
@@ -182,25 +167,23 @@ async def on_message(message: discord.Message):
         except:
             pass
 
-        if "الحجر" in action_taken:
+        if "محجور" in action_taken:
             try:
-                jail_role = discord.utils.get(guild.roles, name="قوانين-الحجر")
-                if not jail_role:
-                    jail_role = await guild.create_role(name="قوانين-الحجر", color=discord.Color.dark_grey())
-                    
-                jail_channel = discord.utils.get(guild.text_channels, name="quarantine-zone")
-                if not jail_channel:
-                    overwrites = {
-                        guild.default_role: discord.PermissionOverwrite(view_channel=False),
-                        jail_role: discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True)
-                    }
-                    jail_channel = await guild.create_text_channel("quarantine-zone", overwrites=overwrites)
-                else:
-                    await jail_channel.set_permissions(jail_role, view_channel=True, send_messages=True, read_message_history=True)
-                    await jail_channel.set_permissions(guild.default_role, view_channel=False)
+                jail_role = discord.utils.get(guild.roles, name="محجور")
+                if jail_role:
+                    jail_channel = discord.utils.get(guild.text_channels, name="quarantine-zone")
+                    if not jail_channel:
+                        overwrites = {
+                            guild.default_role: discord.PermissionOverwrite(view_channel=False),
+                            jail_role: discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True)
+                        }
+                        jail_channel = await guild.create_text_channel("quarantine-zone", overwrites=overwrites)
+                    else:
+                        await jail_channel.set_permissions(jail_role, view_channel=True, send_messages=True, read_message_history=True)
+                        await jail_channel.set_permissions(guild.default_role, view_channel=False)
 
-                saved_roles[message.author.id] = [r for r in message.author.roles if r != guild.default_role and r != jail_role]
-                await message.author.edit(roles=[jail_role], reason="استخدام ألفاظ نابية / سب وشتم")
+                    saved_roles[message.author.id] = [r for r in message.author.roles if r != guild.default_role and r != jail_role]
+                    await message.author.edit(roles=[jail_role], reason="استخدام ألفاظ نابية / سب وشتم")
             except Exception as e:
                 print(f"❌ خطأ في تطبيق الحجر: {e}")
         else:
@@ -210,7 +193,6 @@ async def on_message(message: discord.Message):
             except Exception as e:
                 print(f"❌ خطأ في تطبيق التايم آوت: {e}")
 
-        # إرسال التقرير لروم admin-review
         if admin_channel:
             embed = discord.Embed(
                 title="🚨 رصد مخالفة في الشات",
@@ -236,40 +218,28 @@ async def on_message(message: discord.Message):
 async def on_member_join(member: discord.Member):
     guild = member.guild
     
-    # 1. إرسال القوانين في رسالة خاصة (DM)
+    # 1. إرسال القوانين بنفس شكل وثيم الصورة المطابقة
     try:
         dm_embed = discord.Embed(
-            title=f"أهلاً بك في {guild.name}! 🌟",
+            title=f"أهلاً بك في 💭 {guild.name} | ! 🌟",
             description=RULES_TEXT,
-            color=discord.Color.blurple(),
-            timestamp=discord.utils.utcnow()
+            color=discord.Color.blurple()
         )
-        dm_embed.set_footer(text=f"سيرفر {guild.name} - نرجو الالتزام")
         await member.send(embed=dm_embed)
     except discord.Forbidden:
-        print(f"⚠️ تعذر إرسال القوانين للخاص للعضو {member.name} (الخاص مغلق).")
+        pass
 
-    # 2. الترحيب في روم "الترحيب〢✋🏻"
+    # 2. الترحيب في سيرفر الترحيب
     channel = discord.utils.get(guild.text_channels, name="الترحيب〢✋🏻")
     if channel:
-        server_icon = guild.icon.url if guild.icon else member.display_avatar.url
-
         embed = discord.Embed(
-            title=f"أهلاً بك في {guild.name}! 🎉",
-            description=f"مرحباً بك {member.mention} في سيرفرنا!\nنحن سعداء جداً بانضمامك إلينا ونتمنى لك قضاء أوقات ممتعة معنا.",
-            color=discord.Color.brand_green(),
-            timestamp=discord.utils.utcnow()
+            title="🎉 عضو جديد انضم إلينا!",
+            description=f"مرحباً بك {member.mention} في 🌤️||\n**!{guild.name}**\n\nنتمنى لك قضاء وقت ممتع معنا.",
+            color=discord.Color.brand_green()
         )
-        
         embed.set_thumbnail(url=member.display_avatar.url)
-        embed.set_image(url=server_icon)
-        
-        embed.add_field(name="📋 معلومات العضو", value=f"• الترتيب في السيرفر: **#{guild.member_count}**\n• تاريخ إنشاء الحساب: <t:{int(member.created_at.timestamp())}:R>", inline=False)
-        embed.set_footer(text=guild.name, icon_url=server_icon)
+        await channel.send(content=member.mention, embed=embed)
 
-        await channel.send(embed=embed)
-
-    # 3. لوق دخول الأعضاء
     log_channel = discord.utils.get(guild.text_channels, name="دخول_خروج-💿") or discord.utils.get(guild.text_channels, name="دخول_خروج")
     if log_channel:
         log_embed = discord.Embed(title="📥 عضو جديد انضم للسيرفر", color=discord.Color.green(), timestamp=discord.utils.utcnow())
@@ -446,7 +416,67 @@ class TicketButtonView(View):
         await interaction.response.send_message(f"✅ تم فتح تذكرتك بنجاح: {ticket_channel.mention}", ephemeral=True)
 
 
-@bot.tree.command(name="اعداد_اللوقات", description="إنشاء جميع رومات اللوقات الإدارية بدقة نفس الشكل المطلوب تلقائياً")
+# ==================== الأوامر الإدارية والأمان ====================
+
+@bot.tree.command(name="حجر", description="حجر عضو يدوي وسحب رتبه وإعطاؤه رتبة محجور")
+@discord.app_commands.describe(member="اختر العضو المراد حجره", reason="سبب الحجر")
+async def jail_member(interaction: discord.Interaction, member: discord.Member, reason: str = "لم يتم تحديد سبب"):
+    if not await check_owner_or_deputy_perm(interaction):
+        return
+
+    if is_exempted(member):
+        await interaction.response.send_message("❌ لا يمكنك حجر هذا الشخص لأنه من الأشخاص أو الرتب المحمية!", ephemeral=True)
+        return
+
+    guild = interaction.guild
+    jail_role = discord.utils.get(guild.roles, name="محجور")
+    
+    if not jail_role:
+        await interaction.response.send_message("❌ لم يتم العثور على رتبة **محجور** بالسيرفر، يرجى التأكد من اسمها.", ephemeral=True)
+        return
+
+    try:
+        saved_roles[member.id] = [r for r in member.roles if r != guild.default_role and r != jail_role]
+        await member.edit(roles=[jail_role], reason=f"حجر يدوي بواسطة {interaction.user.name}: {reason}")
+        
+        admin_channel = discord.utils.get(guild.text_channels, name="admin-review")
+        if admin_channel:
+            embed = discord.Embed(title="🔒 تم حجر عضو", color=discord.Color.dark_red(), timestamp=discord.utils.utcnow())
+            embed.add_field(name="المعاقب", value=member.mention, inline=False)
+            embed.add_field(name="بواسطة", value=interaction.user.mention, inline=False)
+            embed.add_field(name="السبب", value=reason, inline=False)
+            await admin_channel.send(embed=embed)
+
+        await interaction.response.send_message(f"✅ تم وضع العضو {member.mention} في الحجر وإعطاؤه رتبة **محجور** بنجاح.", ephemeral=True)
+    except Exception as e:
+        await interaction.response.send_message(f"❌ حدث خطأ أثناء تطبيق الحجر: {e}", ephemeral=True)
+
+
+@bot.tree.command(name="فك_الحجر", description="إخراج عضو من الحجر وإعادة رتبه السابقة")
+@discord.app_commands.describe(member="اختر العضو المراد إخراجه من الحجر")
+async def unjail(interaction: discord.Interaction, member: discord.Member):
+    if not await check_owner_or_deputy_perm(interaction):
+        return
+
+    jail_role = discord.utils.get(interaction.guild.roles, name="محجور")
+    if jail_role and jail_role in member.roles:
+        try:
+            await member.remove_roles(jail_role)
+        except:
+            pass
+    
+    if member.id in saved_roles:
+        roles_to_restore = [interaction.guild.get_role(r.id) for r in saved_roles[member.id] if interaction.guild.get_role(r.id)]
+        try:
+            await member.add_roles(*roles_to_restore)
+        except:
+            pass
+        del saved_roles[member.id]
+        
+    await interaction.response.send_message(f"🔓 تم إخراج العضو {member.mention} من الحجر وإعادة رتبه السابقة بنجاح.", ephemeral=True)
+
+
+@bot.tree.command(name="اعداد_اللوقات", description="إنشاء جميع رومات اللوقات الإدارية بدقة تلقائياً")
 async def setup_logs(interaction: discord.Interaction):
     if not await check_owner_or_deputy_perm(interaction):
         return
@@ -495,19 +525,19 @@ async def setup(interaction: discord.Interaction):
     if not discord.utils.get(guild.roles, name="مسؤول-التقديم"):
         await guild.create_role(name="مسؤول-التقديم", color=discord.Color.purple())
     
-    jail_role = discord.utils.get(guild.roles, name="قوانين-الحجر")
-    if not jail_role:
-        jail_role = await guild.create_role(name="قوانين-الحجر", color=discord.Color.dark_grey())
+    jail_role = discord.utils.get(guild.roles, name="محجور")
 
     jail_channel = discord.utils.get(guild.text_channels, name="quarantine-zone")
     if not jail_channel:
         overwrites = {
             guild.default_role: discord.PermissionOverwrite(view_channel=False),
-            jail_role: discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True)
         }
+        if jail_role:
+            overwrites[jail_role] = discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True)
         await guild.create_text_channel("quarantine-zone", overwrites=overwrites)
     else:
-        await jail_channel.set_permissions(jail_role, view_channel=True, send_messages=True, read_message_history=True)
+        if jail_role:
+            await jail_channel.set_permissions(jail_role, view_channel=True, send_messages=True, read_message_history=True)
         await jail_channel.set_permissions(guild.default_role, view_channel=False)
 
     admin_channel = discord.utils.get(guild.text_channels, name="admin-review")
@@ -698,31 +728,7 @@ async def protection_dashboard(interaction: discord.Interaction):
     await interaction.response.send_message(embed=embed, ephemeral=True)
 
 
-@bot.tree.command(name="فك_الحجر", description="إخراج عضو من الحجر وإعادة رتبه السابقة")
-@discord.app_commands.describe(member="اختر العضو المراد إخراجه من الحجر")
-async def unjail(interaction: discord.Interaction, member: discord.Member):
-    if not await check_owner_or_deputy_perm(interaction):
-        return
-
-    jail_role = discord.utils.get(interaction.guild.roles, name="قوانين-الحجر")
-    if jail_role and jail_role in member.roles:
-        try:
-            await member.remove_roles(jail_role)
-        except:
-            pass
-    
-    if member.id in saved_roles:
-        roles_to_restore = [interaction.guild.get_role(r.id) for r in saved_roles[member.id] if interaction.guild.get_role(r.id)]
-        try:
-            await member.add_roles(*roles_to_restore)
-        except:
-            pass
-        del saved_roles[member.id]
-        
-    await interaction.response.send_message(f"🔓 تم إخراج العضو {member.mention} من الحجر وإعادة رتبه السابقة بنجاح.", ephemeral=True)
-
-
-@bot.tree.command(name="حذف", description="حذف عدد من الرسائل في الروم (الحد الأقصى 100 رسالة)")
+@bot.tree.command(name="مسح", description="حذف عدد من الرسائل في الروم (الحد الأقصى 100 رسالة)")
 @discord.app_commands.describe(amount="عدد الرسائل المراد حذفها (من 1 إلى 100)")
 async def clear_messages(interaction: discord.Interaction, amount: int):
     if not await check_owner_or_deputy_perm(interaction):
