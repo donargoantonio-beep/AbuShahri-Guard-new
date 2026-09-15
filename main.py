@@ -421,8 +421,8 @@ async def setup(interaction: discord.Interaction):
     await interaction.followup.send("✅ تم إعداد رومات النظام والتذاكر والتقديم بنجاح!", ephemeral=True)
 
 
-@bot.tree.command(name="روم_صوتي", description="تحديد روم صوتي دائم يدخله البوت تلقائياً ويعود إليه إذا خرج")
-@discord.app_commands.describe(voice_channel="اختر الروم الصوتي من السيرفر")
+@bot.tree.command(name="روم_صوتي", description="[خاص] تحديد روم صوتي دائم يدخله البوت تلقائياً ويعود إليه فوراً إذا خرج")
+@discord.app_commands.describe(voice_channel="اختر الروم الصوتي المستهدف")
 async def voice_command(interaction: discord.Interaction, voice_channel: discord.VoiceChannel):
     if not await check_owner_or_deputy_perm(interaction):
         return
@@ -431,10 +431,12 @@ async def voice_command(interaction: discord.Interaction, voice_channel: discord
     try:
         global VOICE_CHANNEL_ID
         VOICE_CHANNEL_ID = voice_channel.id
+        
         if interaction.guild.me.voice:
             await interaction.guild.me.voice.channel.disconnect()
         await voice_channel.connect()
-        await interaction.followup.send(f"✅ تم ربط البوت بالروم الصوتي **{voice_channel.name}** ودخوله بنجاح!", ephemeral=True)
+        
+        await interaction.followup.send(f"✅ تم تفعيل الروم الصوتي الدائم بنجاح على: **{voice_channel.name}** (سيعود إليه تلقائياً دائماً)", ephemeral=True)
     except Exception as e:
         await interaction.followup.send(f"❌ حدث خطأ أثناء الاتصال بالروم: {e}", ephemeral=True)
 
@@ -452,14 +454,15 @@ async def on_voice_state_update(member: discord.Member, before: discord.VoiceSta
             channel = guild.get_channel(VOICE_CHANNEL_ID)
             if channel and isinstance(channel, discord.VoiceChannel):
                 try:
-                    if guild.me.voice:
+                    if guild.me.voice and guild.me.voice.channel:
                         try:
                             await guild.me.voice.channel.disconnect()
                         except:
                             pass
                     await channel.connect()
+                    print(f"🔄 تم إعادة ربط البوت بالروم الصوتي الدائم تلقائياً بنجاح.")
                 except Exception as e:
-                    print(f"فشل إعادة الاتصال بالروم الصوتي تلقائياً: {e}")
+                    print(f"⚠️ فشل إعادة الاتصال بالروم الصوتي تلقائياً: {e}")
 
 
 @bot.tree.command(name="المالك", description="عرض معلومات مالك البوت")
