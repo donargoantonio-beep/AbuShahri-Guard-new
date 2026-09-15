@@ -1,6 +1,9 @@
 import os
+import re
+import time
 import asyncio
 import datetime
+import unicodedata
 import discord
 from discord.ext import commands
 from discord.ui import View, Button, Modal, TextInput
@@ -21,23 +24,68 @@ protected_roles_list = []
 deputy_user_ids = []           
 
 # ==================== إعدادات مالك البوت ====================
-BOT_OWNER_ID = 813236200142929950  # <--- آيديك الأساسي
+BOT_OWNER_ID = 813236200142929950  # آيدي المالك
 # ========================================================
 
 VOICE_CHANNEL_ID = 0  
 
-BAD_WORDS = ["كلب", "حمار", "قحبة", "زق", "خرا", "شمهور", "يعور", "لعنة", "قحط"] 
+# قائمة الكلمات المحظورة (الصريحة والمشفرة)
+BAD_WORDS = [
+    # كلمات باللغة العربية
+    "كلب", "حمار", "قحبة", "زق", "خرا", "شمهور", "يعور", "لعنة", "قحط", 
+    "منيوك", "شرطوط", "ديوث", "طيز", "زب", "كس", "شرموط", "فك", "قحبه",
+    "سكس", "مخصي", "عرص", "بنيكك",
+    
+    # English Words
+    "fuck", "shit", "bitch", "asshole", "dick", "cunt", "bastard", 
+    "slut", "whore", "pussy", "stfu", "motherfucker", "nigger"
+] 
+
+# تعبير نمطي لكشف الروابط والدعوات
+URL_REGEX = re.compile(r"(https?://[^\s]+|discord\.gg/[^\s]+|discord\.com/invite/[^\s]+|www\.[^\s]+)")
+
 SPAM_TRACKER = {}
+USER_VIOLATIONS = {}  # {user_id: count}
 
 # نص القوانين
 RULES_TEXT = """📜 **قوانين وعقوبات السيرفر:**
 
-1. **السب والشتم والألفاظ النابية:** يمنع منعاً باتاً (عقوبة: تحويل لرتبة محجور).
-2. **إرسال الروابط والدعوات الخارجية:** غير مسموح (عقوبة: تايم آوت ساعة).
-3. **السبام وتكرار الرسائل:** غير مسموح (عقوبة: تايم آوت ساعة).
+1. **السب والشتم والألفاظ النابية (بما في ذلك التشفير والرموز):** يمنع منعاً باتاً (عقوبة: تحويل لرتبة محجور).
+2. **إرسال الروابط والدعوات الخارجية:** غير مسموح (عقوبة: تايم آوت يتدبل مع كل تكرار).
+3. **السبام وتكرار الرسائل:** غير مسموح (عقوبة: تايم آوت يتدبل مع كل تكرار).
 4. **الاحترام المتبادل:** يرجى احترام جميع الأعضاء لتجنب العقوبات.
 
-نتمنى لك وقتاً ممتعاً معنا! 🌹"""
+تنبيه: تتضاعف مدة التايم آوت تلقائياً مع كل مخالفة جديدة! ⚠️"""
+
+# ==================== خوارزمية فك تشفير النصوص والرموز ====================
+
+def normalize_text(text: str):
+    """
+    تقوم هذه الدالة بتنظيف النص من الحركات، الرموز، الفواصل، الزخارف، 
+    وتحويل أرقام وقواعد Leetspeak للحروف الأصلية لكشف الكلمات المخفية.
+    """
+    text = text.lower()
+
+    # 1. إزالة التشكيل والحركات العربية
+    tashkeel = re.compile(r'[\u0617-\u061A\u064B-\u0652]')
+    text = re.sub(tashkeel, '', text)
+
+    # 2. استبدال رموز الأرقام الشائعة باللغة الإنجليزية (Leetspeak)
+    leetspeak = {
+        '@': 'a', '$': 's', '0': 'o', '1': 'i', '3': 'e', 
+        '5': 's', '7': 'h', '!': 'i', '|': 'l', 'v': 'u'
+    }
+    for symbol, char in leetspeak.items():
+        text = text.replace(symbol, char)
+
+    # 3. إزالة كافة الرموز والفواصل والأرقام للحصول على الحروف النظيفة فقط
+    cleaned_chars = re.sub(r'[^a-zA-Z\u0600-\u06FF]', '', text)
+
+    # 4. دمج الحروف المكررة
+    collapsed_chars = re.sub(r'(.)\1+', r'\1', cleaned_chars)
+
+    return text, cleaned_chars, collapsed_chars
+
 
 async def check_owner_or_deputy_perm(interaction: discord.Interaction):
     if interaction.user.id == BOT_OWNER_ID or interaction.user.id in deputy_user_ids:
@@ -122,7 +170,7 @@ async def on_guild_channel_delete(channel: discord.abc.GuildChannel):
             print(f"❌ خطأ أثناء معاقبة المخالف: {e}")
 
 
-# ==================== نظام المراقبة التلقائية للشات والعقوبات ====================
+# ==================== نظام المراقبة التلقائية ومضاعفة العقوبات ====================
 
 @bot.event
 async def on_message(message: discord.Message):
@@ -133,41 +181,47 @@ async def on_message(message: discord.Message):
         await bot.process_commands(message)
         return
 
-    content_lower = message.content.lower()
+    raw_text = message.content
+    norm_text, cleaned_text, collapsed_text = normalize_text(raw_text)
     violation_type = None
-    action_taken = None
 
-    if any(word in content_lower for word in BAD_WORDS):
-        violation_type = "السب والشتم / ألفاظ نابية"
-        action_taken = "إعطاء العضو رتبة محجور"
+    # 1. فحص السب الصريح + السب المشفر بالرموز والتكرارات
+    for bad_word in BAD_WORDS:
+        if bad_word in norm_text or bad_word in cleaned_text or bad_word in collapsed_text:
+            violation_type = "السب والشتم / ألفاظ نابية (صريحة أو مشفرة)"
+            break
 
-    if not violation_type:
-        if "http://" in content_lower or "https://" in content_lower or "discord.gg/" in content_lower or "www." in content_lower:
-            violation_type = "إرسال روابط غير مصرح بها"
-            action_taken = "تايم آوت لمدة ساعة"
+    # 2. فحص الروابط والدعوات الخارجية
+    if not violation_type and URL_REGEX.search(norm_text):
+        violation_type = "إرسال روابط أو دعوات سيرفرات"
 
+    # 3. فحص السبام وتكرار الرسائل
     if not violation_type:
         user_id = message.author.id
-        import time
         current_time = time.time()
         
         if user_id in SPAM_TRACKER:
             last_msg, last_time = SPAM_TRACKER[user_id]
-            if message.content == last_msg and (current_time - last_time) < 3:
+            if raw_text == last_msg and (current_time - last_time) < 3:
                 violation_type = "السبام وتكرار الرسائل بسرعة"
-                action_taken = "تايم آوت لمدة ساعة"
-        SPAM_TRACKER[user_id] = (message.content, current_time)
+        SPAM_TRACKER[user_id] = (raw_text, current_time)
 
+    # تطبيق العقوبة
     if violation_type:
         guild = message.guild
-        admin_channel = discord.utils.get(guild.text_channels, name="admin-review")
+        user_id = message.author.id
 
         try:
             await message.delete()
         except:
             pass
 
-        if "محجور" in action_taken:
+        USER_VIOLATIONS[user_id] = USER_VIOLATIONS.get(user_id, 0) + 1
+        v_count = USER_VIOLATIONS[user_id]
+
+        # إذا كانت المخالفة سب مباشر/مشفر أو تجاوز عدد التكرار 3 مرات -> تحويل للحجر
+        if "السب والشتم" in violation_type or v_count >= 4:
+            action_taken = f"تحويل لرتبة محجور (المخالفة رقم {v_count})"
             try:
                 jail_role = discord.utils.get(guild.roles, name="محجور")
                 if jail_role:
@@ -182,20 +236,26 @@ async def on_message(message: discord.Message):
                         await jail_channel.set_permissions(jail_role, view_channel=True, send_messages=True, read_message_history=True)
                         await jail_channel.set_permissions(guild.default_role, view_channel=False)
 
-                    saved_roles[message.author.id] = [r for r in message.author.roles if r != guild.default_role and r != jail_role]
-                    await message.author.edit(roles=[jail_role], reason="استخدام ألفاظ نابية / سب وشتم")
+                    saved_roles[user_id] = [r for r in message.author.roles if r != guild.default_role and r != jail_role]
+                    await message.author.edit(roles=[jail_role], reason=f"تكرار/شدة المخالفة ({v_count} مرات): {violation_type}")
             except Exception as e:
                 print(f"❌ خطأ في تطبيق الحجر: {e}")
         else:
+            # مضاعفة مدة التايم آوت: 1 ساعة -> 2 ساعتين -> 4 ساعات...
+            timeout_hours = min(1 * (2 ** (v_count - 1)), 24)
+            action_taken = f"تايم آوت لمدة {timeout_hours} ساعة (مضاعفة للمخالفة رقم {v_count})"
+            
             try:
-                duration = datetime.timedelta(hours=1)
-                await message.author.timeout(duration, reason=f"مخالفة الشات: {violation_type}")
+                duration = datetime.timedelta(hours=timeout_hours)
+                await message.author.timeout(duration, reason=f"مخالفة رقم {v_count}: {violation_type}")
             except Exception as e:
                 print(f"❌ خطأ في تطبيق التايم آوت: {e}")
 
+        # إرسال تقرير المخالفة للوق الإدارة
+        admin_channel = discord.utils.get(guild.text_channels, name="admin-review")
         if admin_channel:
             embed = discord.Embed(
-                title="🚨 رصد مخالفة في الشات",
+                title="🚨 رصد مخالفة جديدة",
                 color=discord.Color.red(),
                 timestamp=discord.utils.utcnow()
             )
@@ -203,8 +263,9 @@ async def on_message(message: discord.Message):
             embed.add_field(name="العضو المخالف", value=f"{message.author.mention} (`{message.author.id}`)", inline=False)
             embed.add_field(name="الروم", value=message.channel.mention, inline=True)
             embed.add_field(name="نوع المخالفة", value=violation_type, inline=True)
-            embed.add_field(name="الإجراء المتخذ", value=action_taken, inline=True)
-            embed.add_field(name="محتوى الرسالة المحذوفة", value=message.content or "*(وسائط أو محتوى فارغ)*", inline=False)
+            embed.add_field(name="سجل المخالفات", value=f"المخالفة رقم **{v_count}**", inline=True)
+            embed.add_field(name="الإجراء المتخذ", value=action_taken, inline=False)
+            embed.add_field(name="محتوى الرسالة الأصلي", value=f"`{raw_text}`" or "*(وسائط)*", inline=False)
             
             await admin_channel.send(embed=embed)
         return
@@ -218,9 +279,7 @@ async def on_message(message: discord.Message):
 async def on_member_join(member: discord.Member):
     guild = member.guild
     
-    # 1. إرسال القوانين للخاص بنفس شكل العنوان في الصورة + زر الانتقال للسيرفر
     try:
-        # إنشاء رابط دعوة تلقائي لإضافته في الزر
         invite_url = None
         try:
             invites = await guild.invites()
@@ -250,7 +309,6 @@ async def on_member_join(member: discord.Member):
     except discord.Forbidden:
         pass
 
-    # 2. الترحيب في روم الترحيب
     channel = discord.utils.get(guild.text_channels, name="الترحيب〢✋🏻")
     if channel:
         embed = discord.Embed(
@@ -473,7 +531,7 @@ async def jail_member(interaction: discord.Interaction, member: discord.Member, 
         await interaction.response.send_message(f"❌ حدث خطأ أثناء تطبيق الحجر: {e}", ephemeral=True)
 
 
-@bot.tree.command(name="فك_الحجر", description="إخراج عضو من الحجر وإعادة رتبه السابقة")
+@bot.tree.command(name="فك_الحجر", description="إخراج عضو من الحجر وإعادة رتبه السابقة ومسح سجل مخالفاته")
 @discord.app_commands.describe(member="اختر العضو المراد إخراجه من الحجر")
 async def unjail(interaction: discord.Interaction, member: discord.Member):
     if not await check_owner_or_deputy_perm(interaction):
@@ -493,8 +551,24 @@ async def unjail(interaction: discord.Interaction, member: discord.Member):
         except:
             pass
         del saved_roles[member.id]
+
+    if member.id in USER_VIOLATIONS:
+        del USER_VIOLATIONS[member.id]
         
-    await interaction.response.send_message(f"🔓 تم إخراج العضو {member.mention} من الحجر وإعادة رتبه السابقة بنجاح.", ephemeral=True)
+    await interaction.response.send_message(f"🔓 تم إخراج العضو {member.mention} من الحجر وإعادة رتبه وتصفير سجل مخالفاته بنجاح.", ephemeral=True)
+
+
+@bot.tree.command(name="تصفير_مخالفات", description="تصفير سجل المخالفات لعضو معين ليتحول التايم آوت لمدته الأولى")
+@discord.app_commands.describe(member="اختر العضو المراد تصفير مخالفاته")
+async def reset_violations(interaction: discord.Interaction, member: discord.Member):
+    if not await check_owner_or_deputy_perm(interaction):
+        return
+
+    if member.id in USER_VIOLATIONS:
+        del USER_VIOLATIONS[member.id]
+        await interaction.response.send_message(f"✅ تم تصفير سجل المخالفات للعضو {member.mention} بنجاح.", ephemeral=True)
+    else:
+        await interaction.response.send_message(f"ℹ️ العضو {member.mention} ليس لديه أية مخالفات مسجلة.", ephemeral=True)
 
 
 @bot.tree.command(name="اعداد_اللوقات", description="إنشاء جميع رومات اللوقات الإدارية بدقة تلقائياً")
