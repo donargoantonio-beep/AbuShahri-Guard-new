@@ -1,5 +1,6 @@
 import os
 import asyncio
+import datetime
 import discord
 from discord.ext import commands
 from discord.ui import View, Button, Modal, TextInput
@@ -24,6 +25,26 @@ BOT_OWNER_ID = 813236200142929950  # <--- آيديك الأساسي
 # ========================================================
 
 VOICE_CHANNEL_ID = 0  
+
+# قائمة الكلمات النابية والسب الممنوعة
+BAD_WORDS = ["كلب", "حمار", "قحبة", "زق", "خرا", "شمهور", "يعور", "لعنة", "قحط"] 
+SPAM_TRACKER = {}
+
+# نص القوانين للإرسال بالخاص
+RULES_TEXT = """
+📜 **قوانين وعقوبات سيرفرنا:**
+
+1. **السب والشتم والألفاظ النابية:**
+   • *العقوبة:* **وضع العضو في الحجر فوراً** مع سحب الرتب المؤقتة وإرسال التقرير للإدارة.
+2. **إرسال الروابط والدعوات الخارجية:**
+   • *العقوبة:* **تايم آوت (Timeout) لمدة ساعة كاملة** + حذف الرسالة.
+3. **السبام وتكرار الرسائل أو الحروف:**
+   • *العقوبة:* **تايم آوت (Timeout) لمدة ساعة كاملة** + حذف الرسالة.
+4. **احترام الجميع وعدم إثارة المشاكل:**
+   • *العقوبة:* تايم آوت لمدة ساعة أو تصعيد العقوبة.
+
+يرجى الالتزام التام بالقوانين لتجنب العقوبات الإدارية.
+"""
 
 async def check_owner_or_deputy_perm(interaction: discord.Interaction):
     if interaction.user.id == BOT_OWNER_ID or interaction.user.id in deputy_user_ids:
@@ -110,13 +131,125 @@ async def on_guild_channel_delete(channel: discord.abc.GuildChannel):
             print(f"❌ خطأ أثناء معاقبة المخالف: {e}")
 
 
-# ==================== نظام الترحيب المخصص بالروم المحدد ====================
+# ==================== نظام المراقبة التلقائية للشات والعقوبات ====================
+
+@bot.event
+async def on_message(message: discord.Message):
+    if message.author.bot or not message.guild:
+        return
+
+    if is_exempted(message.author):
+        await bot.process_commands(message)
+        return
+
+    content_lower = message.content.lower()
+    violation_type = None
+    action_taken = None
+
+    # 1. فحص السب والشتم (العقوبة: وضع بالحجر)
+    for word in BAD_WORDS:
+        if word in content_lower:
+            violation_type = "السب والشتم / ألفاظ نابية"
+            action_taken = "وضع العضو في الحجر"
+            break
+
+    # 2. فحص الروابط (العقوبة: تايم آوت ساعة)
+    if not violation_type:
+        if "http://" in content_lower or "https://" in content_lower or "discord.gg/" in content_lower or "www." in content_lower:
+            violation_type = "إرسال روابط غير مصرح بها"
+            action_taken = "تايم آوت لمدة ساعة"
+
+    # 3. فحص السبام والتكرار (العقوبة: تايم آوت ساعة)
+    if not violation_type:
+        user_id = message.author.id
+        import time
+        current_time = time.time()
+        
+        if user_id in SPAM_TRACKER:
+            last_msg, last_time = SPAM_TRACKER[user_id]
+            if message.content == last_msg and (current_time - last_time) < 3:
+                violation_type = "السبام وتكرار الرسائل بسرعة"
+                action_taken = "تايم آوت لمدة ساعة"
+        SPAM_TRACKER[user_id] = (message.content, current_time)
+
+    # تنفيذ العقوبات عند حدوث مخالفة
+    if violation_type:
+        guild = message.guild
+        admin_channel = discord.utils.get(guild.text_channels, name="admin-review")
+
+        try:
+            await message.delete()
+        except:
+            pass
+
+        if "الحجر" in action_taken:
+            try:
+                jail_role = discord.utils.get(guild.roles, name="قوانين-الحجر")
+                if not jail_role:
+                    jail_role = await guild.create_role(name="قوانين-الحجر", color=discord.Color.dark_grey())
+                    
+                jail_channel = discord.utils.get(guild.text_channels, name="quarantine-zone")
+                if not jail_channel:
+                    overwrites = {
+                        guild.default_role: discord.PermissionOverwrite(view_channel=False),
+                        jail_role: discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True)
+                    }
+                    jail_channel = await guild.create_text_channel("quarantine-zone", overwrites=overwrites)
+                else:
+                    await jail_channel.set_permissions(jail_role, view_channel=True, send_messages=True, read_message_history=True)
+                    await jail_channel.set_permissions(guild.default_role, view_channel=False)
+
+                saved_roles[message.author.id] = [r for r in message.author.roles if r != guild.default_role and r != jail_role]
+                await message.author.edit(roles=[jail_role], reason="استخدام ألفاظ نابية / سب وشتم")
+            except Exception as e:
+                print(f"❌ خطأ في تطبيق الحجر: {e}")
+        else:
+            try:
+                duration = datetime.timedelta(hours=1)
+                await message.author.timeout(duration, reason=f"مخالفة الشات: {violation_type}")
+            except Exception as e:
+                print(f"❌ خطأ في تطبيق التايم آوت: {e}")
+
+        # إرسال التقرير لروم admin-review
+        if admin_channel:
+            embed = discord.Embed(
+                title="🚨 رصد مخالفة في الشات",
+                color=discord.Color.red(),
+                timestamp=discord.utils.utcnow()
+            )
+            embed.set_author(name=message.author.name, icon_url=message.author.display_avatar.url)
+            embed.add_field(name="العضو المخالف", value=f"{message.author.mention} (`{message.author.id}`)", inline=False)
+            embed.add_field(name="الروم", value=message.channel.mention, inline=True)
+            embed.add_field(name="نوع المخالفة", value=violation_type, inline=True)
+            embed.add_field(name="الإجراء المتخذ", value=action_taken, inline=True)
+            embed.add_field(name="محتوى الرسالة المحذوفة", value=message.content or "*(وسائط أو محتوى فارغ)*", inline=False)
+            
+            await admin_channel.send(embed=embed)
+        return
+
+    await bot.process_commands(message)
+
+
+# ==================== نظام الترحيب وإرسال القوانين للخاص ====================
 
 @bot.event
 async def on_member_join(member: discord.Member):
     guild = member.guild
     
-    # الاعتماد فقط على الروم المحدد بالاسم الجديد دون إنشاء رومات جديدة
+    # 1. إرسال القوانين في رسالة خاصة (DM)
+    try:
+        dm_embed = discord.Embed(
+            title=f"أهلاً بك في {guild.name}! 🌟",
+            description=RULES_TEXT,
+            color=discord.Color.blurple(),
+            timestamp=discord.utils.utcnow()
+        )
+        dm_embed.set_footer(text=f"سيرفر {guild.name} - نرجو الالتزام")
+        await member.send(embed=dm_embed)
+    except discord.Forbidden:
+        print(f"⚠️ تعذر إرسال القوانين للخاص للعضو {member.name} (الخاص مغلق).")
+
+    # 2. الترحيب في روم "الترحيب〢✋🏻"
     channel = discord.utils.get(guild.text_channels, name="الترحيب〢✋🏻")
     if channel:
         server_icon = guild.icon.url if guild.icon else member.display_avatar.url
@@ -136,7 +269,7 @@ async def on_member_join(member: discord.Member):
 
         await channel.send(embed=embed)
 
-    # لوق دخول وخروج الأعضاء التقليدي
+    # 3. لوق دخول الأعضاء
     log_channel = discord.utils.get(guild.text_channels, name="دخول_خروج-💿") or discord.utils.get(guild.text_channels, name="دخول_خروج")
     if log_channel:
         log_embed = discord.Embed(title="📥 عضو جديد انضم للسيرفر", color=discord.Color.green(), timestamp=discord.utils.utcnow())
