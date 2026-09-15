@@ -60,10 +60,6 @@ RULES_TEXT = """📜 **قوانين وعقوبات السيرفر:**
 # ==================== خوارزمية فك تشفير النصوص والرموز ====================
 
 def normalize_text(text: str):
-    """
-    تقوم هذه الدالة بتنظيف النص من الحركات، الرموز، الفواصل، الزخارف، 
-    وتحويل أرقام وقواعد Leetspeak للحروف الأصلية لكشف الكلمات المخفية.
-    """
     text = text.lower()
 
     # 1. إزالة التشكيل والحركات العربية
@@ -158,6 +154,13 @@ async def on_guild_channel_delete(channel: discord.abc.GuildChannel):
 
                     saved_roles[member.id] = [r for r in member.roles if r != guild.default_role and r != jail_role]
                     await member.edit(roles=[jail_role], reason="حذف روم بدون صلاحية")
+                    
+                    # طرد من الروم الصوتي فوراً عند الحجر
+                    if member.voice:
+                        try:
+                            await member.move_to(None)
+                        except:
+                            pass
 
                     log_delete = discord.utils.get(guild.text_channels, name="لوق_الحذف-💿") or discord.utils.get(guild.text_channels, name="لوق_الحذف")
                     if log_delete:
@@ -238,10 +241,17 @@ async def on_message(message: discord.Message):
 
                     saved_roles[user_id] = [r for r in message.author.roles if r != guild.default_role and r != jail_role]
                     await message.author.edit(roles=[jail_role], reason=f"تكرار/شدة المخالفة ({v_count} مرات): {violation_type}")
+                    
+                    # طرد من الروم الصوتي فوراً عند الحجر
+                    if message.author.voice:
+                        try:
+                            await message.author.move_to(None)
+                        except:
+                            pass
             except Exception as e:
                 print(f"❌ خطأ في تطبيق الحجر: {e}")
         else:
-            # مضاعفة مدة التايم آوت: 1 ساعة -> 2 ساعتين -> 4 ساعات...
+            # مضاعفة مدة التايم آوت
             timeout_hours = min(1 * (2 ** (v_count - 1)), 24)
             action_taken = f"تايم آوت لمدة {timeout_hours} ساعة (مضاعفة للمخالفة رقم {v_count})"
             
@@ -497,7 +507,7 @@ class TicketButtonView(View):
 
 # ==================== الأوامر الإدارية والأمان ====================
 
-@bot.tree.command(name="حجر", description="حجر عضو يدوي وسحب رتبه وإعطاؤه رتبة محجور")
+@bot.tree.command(name="حجر", description="حجر عضو يدوي وسحب رتبه وإعطاؤه رتبة محجور وطرد من الروم الصوتي")
 @discord.app_commands.describe(member="اختر العضو المراد حجره", reason="سبب الحجر")
 async def jail_member(interaction: discord.Interaction, member: discord.Member, reason: str = "لم يتم تحديد سبب"):
     if not await check_owner_or_deputy_perm(interaction):
@@ -518,6 +528,13 @@ async def jail_member(interaction: discord.Interaction, member: discord.Member, 
         saved_roles[member.id] = [r for r in member.roles if r != guild.default_role and r != jail_role]
         await member.edit(roles=[jail_role], reason=f"حجر يدوي بواسطة {interaction.user.name}: {reason}")
         
+        # طرد العضو من الروم الصوتي فوراً إذا كان بداخل روم صوتي
+        if member.voice:
+            try:
+                await member.move_to(None)
+            except Exception as e:
+                print(f"فشل طرد العضو من الروم الصوتي: {e}")
+
         admin_channel = discord.utils.get(guild.text_channels, name="admin-review")
         if admin_channel:
             embed = discord.Embed(title="🔒 تم حجر عضو", color=discord.Color.dark_red(), timestamp=discord.utils.utcnow())
@@ -526,7 +543,7 @@ async def jail_member(interaction: discord.Interaction, member: discord.Member, 
             embed.add_field(name="السبب", value=reason, inline=False)
             await admin_channel.send(embed=embed)
 
-        await interaction.response.send_message(f"✅ تم وضع العضو {member.mention} في الحجر وإعطاؤه رتبة **محجور** بنجاح.", ephemeral=True)
+        await interaction.response.send_message(f"✅ تم وضع العضو {member.mention} في الحجر وطرده من الروم الصوتي بنجاح.", ephemeral=True)
     except Exception as e:
         await interaction.response.send_message(f"❌ حدث خطأ أثناء تطبيق الحجر: {e}", ephemeral=True)
 
@@ -681,6 +698,17 @@ async def voice_command(interaction: discord.Interaction, voice_channel: discord
 @bot.event
 async def on_voice_state_update(member: discord.Member, before: discord.VoiceState, after: discord.VoiceState):
     global VOICE_CHANNEL_ID
+
+    # 1. منع وطرد أي شخص يملك رتبة "محجور" إذا حاول دخول أي روم صوتي
+    jail_role = discord.utils.get(member.guild.roles, name="محجور")
+    if jail_role and jail_role in member.roles and after.channel is not None:
+        try:
+            await member.move_to(None)
+        except Exception as e:
+            print(f"فشل طرد العضو المحجور من الروم الصوتي: {e}")
+        return
+
+    # 2. حماية بقاء البوت في الروم الصوتي المحدد له
     if VOICE_CHANNEL_ID == 0:
         return
 
