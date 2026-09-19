@@ -1,6 +1,7 @@
 import os
 import re
 import time
+import json
 import asyncio
 import datetime
 import unicodedata
@@ -22,7 +23,30 @@ saved_roles = {}
 protected_users_list = []      
 protected_roles_list = []      
 deputy_user_ids = []           
-USER_WARNINGS = {}  # {user_id: [{"reason": ..., "warned_by": ..., "date": ...}]}
+
+# ==================== نظام حفظ وقراءة التحذيرات تلقائياً (JSON) ====================
+WARNINGS_FILE = "warnings.json"
+
+def load_warnings():
+    """تحميل سجل التحذيرات من الملف عند تشغيل البوت"""
+    if os.path.exists(WARNINGS_FILE):
+        try:
+            with open(WARNINGS_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                return {int(k): v for k, v in data.items()}
+        except Exception as e:
+            print(f"⚠️ خطأ أثناء قراءة ملف التحذيرات: {e}")
+    return {}
+
+def save_warnings():
+    """حفظ التغيرات في سجل التحذيرات على الملف مباشرة"""
+    try:
+        with open(WARNINGS_FILE, "w", encoding="utf-8") as f:
+            json.dump(USER_WARNINGS, f, ensure_ascii=False, indent=4)
+    except Exception as e:
+        print(f"❌ خطأ أثناء حفظ التحذيرات: {e}")
+
+USER_WARNINGS = load_warnings()
 
 # ==================== إعدادات المالك والأدمن ====================
 BOT_OWNER_ID = 813236200142929950  # آيدي المالك
@@ -252,7 +276,7 @@ async def on_message(message: discord.Message):
 
         now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
 
-        # 1. تسجيل التحذير تلقائياً في السجل
+        # 1. تسجيل التحذير تلقائياً وحفظه بالملف
         if user_id not in USER_WARNINGS:
             USER_WARNINGS[user_id] = []
         
@@ -261,6 +285,7 @@ async def on_message(message: discord.Message):
             "warned_by": "النظام التلقائي 🤖",
             "date": now_str
         })
+        save_warnings()  # حفظ سجل التحذيرات تلقائياً
 
         warn_count = len(USER_WARNINGS[user_id])
         action_taken = ""
@@ -297,11 +322,13 @@ async def on_message(message: discord.Message):
 
         # ب) باقي المخالفات: تحذير + تايم آوت ساعة (وحجر عند الوصول لـ 3 تحذيرات)
         else:
-            # تطبيق التايم آوت لمدة ساعة
+            # تطبيق التايم آوت لمدة ساعة بدقة باستخدام discord.utils.utcnow()
             try:
-                duration = datetime.timedelta(hours=1)
-                await member.timeout(duration, reason=f"تحذير رقم {warn_count}: {violation_type}")
+                until = discord.utils.utcnow() + datetime.timedelta(hours=1)
+                await member.timeout(until, reason=f"تحذير رقم {warn_count}: {violation_type}")
                 action_taken = f"⚠️ **تحذير رقم {warn_count}** + ⏱️ **تايم آوت ساعة**."
+            except discord.Forbidden:
+                action_taken = f"⚠️ **تحذير رقم {warn_count}** (❌ فشل التايم آوت: البوت لا يمتلك صلاحية أو رتبته أقل من العضو)."
             except Exception as e:
                 action_taken = f"⚠️ **تحذير رقم {warn_count}** (❌ فشل تطبيق التايم آوت: {e})"
 
@@ -635,6 +662,7 @@ async def warn_member(interaction: discord.Interaction, member: discord.Member, 
         "warned_by": interaction.user.name,
         "date": now_str
     })
+    save_warnings()  # حفظ التحذير اليدوي في الملف
 
     warn_count = len(USER_WARNINGS[member.id])
 
@@ -756,6 +784,7 @@ async def unjail(interaction: discord.Interaction, member: discord.Member):
 
     if member.id in USER_WARNINGS:
         del USER_WARNINGS[member.id]
+        save_warnings()  # تحديث وحفظ الملف بعد مسح التحذيرات
         
     await interaction.response.send_message(f"🔓 تم إخراج العضو {member.mention} من الحجر وإعادة رتبه وتصفير سجل تحذيراته ومخالفاته بنجاح.", ephemeral=True)
 
@@ -768,6 +797,7 @@ async def reset_violations(interaction: discord.Interaction, member: discord.Mem
 
     if member.id in USER_WARNINGS:
         del USER_WARNINGS[member.id]
+        save_warnings()  # تحديث وحفظ الملف بعد التصفير
         await interaction.response.send_message(f"✅ تم تصفير سجل المخالفات والتحذيرات للعضو {member.mention} بنجاح.", ephemeral=True)
     else:
         await interaction.response.send_message(f"ℹ️ العضو {member.mention} ليس لديه أية مخالفات أو تحذيرات مسجلة.", ephemeral=True)
