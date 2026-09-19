@@ -55,7 +55,8 @@ RULES_TEXT = """📜 **قوانين وعقوبات السيرفر:**
 1. **السب والشتم والألفاظ النابية (بما في ذلك التشفير والرموز):** يمنع منعاً باتاً (عقوبة: تحويل لرتبة محجور).
 2. **إرسال الروابط والدعوات الخارجية:** غير مسموح (عقوبة: تايم آوت يتدبل مع كل تكرار).
 3. **السبام وتكرار الرسائل:** غير مسموح (عقوبة: تايم آوت يتدبل مع كل تكرار).
-4. **الاحترام المتبادل:** يرجى احترام جميع الأعضاء لتجنب العقوبات.
+4. **منشن الجميع (@everyone / @here):** غير مسموح (عقوبة: تايم آوت لمدة ساعة واحدة مباشرة).
+5. **الاحترام المتبادل:** يرجى احترام جميع الأعضاء لتجنب العقوبات.
 
 تنبيه: تتضاعف مدة التايم آوت تلقائياً مع كل مخالفة جديدة! ⚠️"""
 
@@ -217,14 +218,22 @@ async def on_message(message: discord.Message):
     norm_text, cleaned_text, collapsed_text = normalize_text(raw_text)
     violation_type = None
 
-    for bad_word in BAD_WORDS:
-        if bad_word in norm_text or bad_word in cleaned_text or bad_word in collapsed_text:
-            violation_type = "السب والشتم / ألفاظ نابية (صريحة أو مشفرة)"
-            break
+    # 1. فحص منشن الجميع (@everyone / @here)
+    if message.mention_everyone:
+        violation_type = "منشن الجميع (@everyone / @here)"
 
+    # 2. فحص الكلمات المحظورة
+    if not violation_type:
+        for bad_word in BAD_WORDS:
+            if bad_word in norm_text or bad_word in cleaned_text or bad_word in collapsed_text:
+                violation_type = "السب والشتم / ألفاظ نابية (صريحة أو مشفرة)"
+                break
+
+    # 3. فحص الروابط والدعوات
     if not violation_type and URL_REGEX.search(norm_text):
         violation_type = "إرسال روابط أو دعوات سيرفرات"
 
+    # 4. فحص السبام
     if not violation_type:
         user_id = message.author.id
         current_time = time.time()
@@ -235,6 +244,7 @@ async def on_message(message: discord.Message):
                 violation_type = "السبام وتكرار الرسائل بسرعة"
         SPAM_TRACKER[user_id] = (raw_text, current_time)
 
+    # معالجة المخالفات
     if violation_type:
         guild = message.guild
         user_id = message.author.id
@@ -244,45 +254,56 @@ async def on_message(message: discord.Message):
         except:
             pass
 
-        USER_VIOLATIONS[user_id] = USER_VIOLATIONS.get(user_id, 0) + 1
-        v_count = USER_VIOLATIONS[user_id]
-
-        if "السب والشتم" in violation_type or v_count >= 4:
-            action_taken = f"تحويل لرتبة محجور (المخالفة رقم {v_count})"
+        # إذا كانت المخالفة منشن الجميع -> تايم آوت ساعة واحدة مباشرة بدون حجر
+        if violation_type == "منشن الجميع (@everyone / @here)":
+            action_taken = "تايم آوت لمدة 1 ساعة (منشن الجميع)"
             try:
-                jail_role = discord.utils.get(guild.roles, name="محجور")
-                if jail_role:
-                    jail_channel = discord.utils.get(guild.text_channels, name="quarantine-zone")
-                    if not jail_channel:
-                        overwrites = {
-                            guild.default_role: discord.PermissionOverwrite(view_channel=False),
-                            jail_role: discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True)
-                        }
-                        jail_channel = await guild.create_text_channel("quarantine-zone", overwrites=overwrites)
-                    else:
-                        await jail_channel.set_permissions(jail_role, view_channel=True, send_messages=True, read_message_history=True)
-                        await jail_channel.set_permissions(guild.default_role, view_channel=False)
-
-                    saved_roles[user_id] = [r for r in message.author.roles if r != guild.default_role and r != jail_role]
-                    await message.author.edit(roles=[jail_role], reason=f"تكرار/شدة المخالفة ({v_count} مرات): {violation_type}")
-                    
-                    if message.author.voice:
-                        try:
-                            await message.author.move_to(None)
-                        except:
-                            pass
+                duration = datetime.timedelta(hours=1)
+                await message.author.timeout(duration, reason=violation_type)
             except Exception as e:
-                print(f"❌ خطأ في تطبيق الحجر: {e}")
+                print(f"❌ خطأ في تطبيق التايم آوت للمنشن: {e}")
         else:
-            timeout_hours = min(1 * (2 ** (v_count - 1)), 24)
-            action_taken = f"تايم آوت لمدة {timeout_hours} ساعة (مضاعفة للمخالفة رقم {v_count})"
-            
-            try:
-                duration = datetime.timedelta(hours=timeout_hours)
-                await message.author.timeout(duration, reason=f"مخالفة رقم {v_count}: {violation_type}")
-            except Exception as e:
-                print(f"❌ خطأ في تطبيق التايم آوت: {e}")
+            # بقية المخالفات (السب، الروابط، السبام)
+            USER_VIOLATIONS[user_id] = USER_VIOLATIONS.get(user_id, 0) + 1
+            v_count = USER_VIOLATIONS[user_id]
 
+            if "السب والشتم" in violation_type or v_count >= 4:
+                action_taken = f"تحويل لرتبة محجور (المخالفة رقم {v_count})"
+                try:
+                    jail_role = discord.utils.get(guild.roles, name="محجور")
+                    if jail_role:
+                        jail_channel = discord.utils.get(guild.text_channels, name="quarantine-zone")
+                        if not jail_channel:
+                            overwrites = {
+                                guild.default_role: discord.PermissionOverwrite(view_channel=False),
+                                jail_role: discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True)
+                            }
+                            jail_channel = await guild.create_text_channel("quarantine-zone", overwrites=overwrites)
+                        else:
+                            await jail_channel.set_permissions(jail_role, view_channel=True, send_messages=True, read_message_history=True)
+                            await jail_channel.set_permissions(guild.default_role, view_channel=False)
+
+                        saved_roles[user_id] = [r for r in message.author.roles if r != guild.default_role and r != jail_role]
+                        await message.author.edit(roles=[jail_role], reason=f"تكرار/شدة المخالفة ({v_count} مرات): {violation_type}")
+                        
+                        if message.author.voice:
+                            try:
+                                await message.author.move_to(None)
+                            except:
+                                pass
+                except Exception as e:
+                    print(f"❌ خطأ في تطبيق الحجر: {e}")
+            else:
+                timeout_hours = min(1 * (2 ** (v_count - 1)), 24)
+                action_taken = f"تايم آوت لمدة {timeout_hours} ساعة (مضاعفة للمخالفة رقم {v_count})"
+                
+                try:
+                    duration = datetime.timedelta(hours=timeout_hours)
+                    await message.author.timeout(duration, reason=f"مخالفة رقم {v_count}: {violation_type}")
+                except Exception as e:
+                    print(f"❌ خطأ في تطبيق التايم آوت: {e}")
+
+        # إرسال سجل المخالفة إلى روم المراجعة
         admin_channel = discord.utils.get(guild.text_channels, name="admin-review")
         if admin_channel:
             embed = discord.Embed(
@@ -294,7 +315,6 @@ async def on_message(message: discord.Message):
             embed.add_field(name="العضو المخالف", value=f"{message.author.mention} (`{message.author.id}`)", inline=False)
             embed.add_field(name="الروم", value=message.channel.mention, inline=True)
             embed.add_field(name="نوع المخالفة", value=violation_type, inline=True)
-            embed.add_field(name="سجل المخالفات", value=f"المخالفة رقم **{v_count}**", inline=True)
             embed.add_field(name="الإجراء المتخذ", value=action_taken, inline=False)
             embed.add_field(name="محتوى الرسالة الأصلي", value=f"`{raw_text}`" or "*(وسائط)*", inline=False)
             
@@ -557,7 +577,6 @@ async def kick_member(interaction: discord.Interaction, member: discord.Member, 
 @bot.tree.command(name="تحذير", description="إرسال تحذير رسمي لعضو وتسجيله في النظام (متاح للأدمن)")
 @discord.app_commands.describe(member="اختر العضو المراد تحذيره", reason="سبب التحذير")
 async def warn_member(interaction: discord.Interaction, member: discord.Member, reason: str = "لم يتم تحديد سبب"):
-    # الصلاحية متاحة للأدمن، النواب والمالك
     if not await check_admin_perm(interaction):
         return
 
@@ -620,7 +639,6 @@ async def check_warnings(interaction: discord.Interaction, member: discord.Membe
 @bot.tree.command(name="حجر", description="حجر عضو يدوي وسحب رتبه وإعطاؤه رتبة محجور (متاح للأدمن)")
 @discord.app_commands.describe(member="اختر العضو المراد حجره", reason="سبب الحجر")
 async def jail_member(interaction: discord.Interaction, member: discord.Member, reason: str = "لم يتم تحديد سبب"):
-    # الصلاحية متاحة للأدمن، النواب والمالك
     if not await check_admin_perm(interaction):
         return
 
@@ -749,7 +767,6 @@ async def setup(interaction: discord.Interaction):
     await interaction.response.defer(ephemeral=True)
     guild = interaction.guild
 
-    # إنشاء رتبة الأدمن تلقائياً
     if not discord.utils.get(guild.roles, name=ADMIN_ROLE_NAME):
         await guild.create_role(name=ADMIN_ROLE_NAME, color=discord.Color.red())
 
@@ -973,7 +990,6 @@ async def protection_dashboard(interaction: discord.Interaction):
 @bot.tree.command(name="مسح", description="حذف عدد من الرسائل في الروم (متاح للأدمن - الحد الأقصى 100 رسالة)")
 @discord.app_commands.describe(amount="عدد الرسائل المراد حذفها (من 1 إلى 100)")
 async def clear_messages(interaction: discord.Interaction, amount: int):
-    # الصلاحية متاحة للأدمن، النواب والمالك
     if not await check_admin_perm(interaction):
         return
 
