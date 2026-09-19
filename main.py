@@ -52,10 +52,10 @@ USER_VIOLATIONS = {}  # {user_id: count}
 # نص القوانين
 RULES_TEXT = """📜 **قوانين وعقوبات السيرفر:**
 
-1. **السب والشتم والألفاظ النابية (بما في ذلك التشفير والرموز):** يمنع منعاً باتاً (عقوبة: تحويل لرتبة محجور).
+1. **السب والشتم والألفاظ النابية:** يمنع منعاً باتاً (عقوبة: تايم آوت يتدبل تلقائياً).
 2. **إرسال الروابط والدعوات الخارجية:** غير مسموح (عقوبة: تايم آوت يتدبل مع كل تكرار).
 3. **السبام وتكرار الرسائل:** غير مسموح (عقوبة: تايم آوت يتدبل مع كل تكرار).
-4. **منشن الجميع (@everyone / @here):** غير مسموح (عقوبة: تايم آوت لمدة ساعة واحدة مباشرة).
+4. **منشن الجميع (@everyone / @here):** غير مسموح (عقوبة: تايم آوت لمدة ساعة مباشرة).
 5. **الاحترام المتبادل:** يرجى احترام جميع الأعضاء لتجنب العقوبات.
 
 تنبيه: تتضاعف مدة التايم آوت تلقائياً مع كل مخالفة جديدة! ⚠️"""
@@ -106,7 +106,7 @@ def is_admin(member: discord.Member) -> bool:
 
 
 async def check_admin_perm(interaction: discord.Interaction):
-    """فحص الصلاحيات المخصصة للأدمن والمالك والنواب (مثل التحذير والحجر والمسح)"""
+    """فحص الصلاحيات المخصصة للأدمن والمالك والنواب"""
     if interaction.user.id == BOT_OWNER_ID or interaction.user.id in deputy_user_ids:
         return True
     if BOT_OWNER_ID == 0 and interaction.user.id == interaction.guild.owner_id:
@@ -122,10 +122,7 @@ async def check_admin_perm(interaction: discord.Interaction):
 
 
 def is_exempted(member: discord.Member):
-    """
-    ملاحظة هامّة: رتبة 'أدمن' ليست ضمن الحصانة (Exempted)
-    بحيث لو قام الأدمن بحذف روم أو تخريب يتم حجره ومعاقبته فوراً.
-    """
+    """التحقق من الحصانة الحصرية للمالك/النواب/المحميين"""
     if member.id == BOT_OWNER_ID or member.id in deputy_user_ids or member.id == member.guild.owner_id:
         return True
     if member.id in protected_users_list:
@@ -152,7 +149,6 @@ async def on_guild_channel_delete(channel: discord.abc.GuildChannel):
     except Exception as e:
         print(f"⚠️ خطأ أثناء قراءة سجلات الحذف: {e}")
 
-    # إذا كان الحاذف أدمن (ليس المالك/النائب/محمي)، سيتم حجره تلقائياً
     if attacker and (attacker.bot or is_exempted(attacker)):
         return
 
@@ -203,7 +199,7 @@ async def on_guild_channel_delete(channel: discord.abc.GuildChannel):
             print(f"❌ خطأ أثناء معاقبة المخالف: {e}")
 
 
-# ==================== نظام المراقبة التلقائية ومضاعفة العقوبات ====================
+# ==================== نظام المراقبة التلقائية وإعطاء التايم آوت ====================
 
 @bot.event
 async def on_message(message: discord.Message):
@@ -226,7 +222,7 @@ async def on_message(message: discord.Message):
     if not violation_type:
         for bad_word in BAD_WORDS:
             if bad_word in norm_text or bad_word in cleaned_text or bad_word in collapsed_text:
-                violation_type = "السب والشتم / ألفاظ نابية (صريحة أو مشفرة)"
+                violation_type = "السب والشتم / ألفاظ نابية"
                 break
 
     # 3. فحص الروابط والدعوات
@@ -244,7 +240,7 @@ async def on_message(message: discord.Message):
                 violation_type = "السبام وتكرار الرسائل بسرعة"
         SPAM_TRACKER[user_id] = (raw_text, current_time)
 
-    # معالجة المخالفات
+    # معالجة المخالفات وتطبيق التايم آوت
     if violation_type:
         guild = message.guild
         user_id = message.author.id
@@ -254,56 +250,44 @@ async def on_message(message: discord.Message):
         except:
             pass
 
-        # إذا كانت المخالفة منشن الجميع -> تايم آوت ساعة واحدة مباشرة بدون حجر
+        USER_VIOLATIONS[user_id] = USER_VIOLATIONS.get(user_id, 0) + 1
+        v_count = USER_VIOLATIONS[user_id]
+
+        # حساب مدة التايم آوت مضاعفة (1, 2, 4, 8, 16... لحد 24 ساعة)
         if violation_type == "منشن الجميع (@everyone / @here)":
-            action_taken = "تايم آوت لمدة 1 ساعة (منشن الجميع)"
-            try:
-                duration = datetime.timedelta(hours=1)
-                await message.author.timeout(duration, reason=violation_type)
-            except Exception as e:
-                print(f"❌ خطأ في تطبيق التايم آوت للمنشن: {e}")
+            timeout_hours = 1
         else:
-            # بقية المخالفات (السب، الروابط، السبام)
-            USER_VIOLATIONS[user_id] = USER_VIOLATIONS.get(user_id, 0) + 1
-            v_count = USER_VIOLATIONS[user_id]
+            timeout_hours = min(1 * (2 ** (v_count - 1)), 24)
 
-            if "السب والشتم" in violation_type or v_count >= 4:
-                action_taken = f"تحويل لرتبة محجور (المخالفة رقم {v_count})"
-                try:
-                    jail_role = discord.utils.get(guild.roles, name="محجور")
-                    if jail_role:
-                        jail_channel = discord.utils.get(guild.text_channels, name="quarantine-zone")
-                        if not jail_channel:
-                            overwrites = {
-                                guild.default_role: discord.PermissionOverwrite(view_channel=False),
-                                jail_role: discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True)
-                            }
-                            jail_channel = await guild.create_text_channel("quarantine-zone", overwrites=overwrites)
-                        else:
-                            await jail_channel.set_permissions(jail_role, view_channel=True, send_messages=True, read_message_history=True)
-                            await jail_channel.set_permissions(guild.default_role, view_channel=False)
+        action_taken = f"⏱️ تم إعطاؤه تايم آوت لمدة **{timeout_hours}** ساعة (مخالفة رقم {v_count})"
+        
+        # تطبيق التايم آوت عبر Discord API
+        try:
+            duration = datetime.timedelta(hours=timeout_hours)
+            await message.author.timeout(duration, reason=f"مخالفة رقم {v_count}: {violation_type}")
+        except Exception as e:
+            action_taken = f"❌ **فشل تطبيق التايم آوت!**\n`السبب:` {e}\n⚠️ *يرجى التأكد من أن رتبة البوت أعلى من رتبة العضو ويمتلك صلاحية (Timeout Members).* "
 
-                        saved_roles[user_id] = [r for r in message.author.roles if r != guild.default_role and r != jail_role]
-                        await message.author.edit(roles=[jail_role], reason=f"تكرار/شدة المخالفة ({v_count} مرات): {violation_type}")
-                        
-                        if message.author.voice:
-                            try:
-                                await message.author.move_to(None)
-                            except:
-                                pass
-                except Exception as e:
-                    print(f"❌ خطأ في تطبيق الحجر: {e}")
-            else:
-                timeout_hours = min(1 * (2 ** (v_count - 1)), 24)
-                action_taken = f"تايم آوت لمدة {timeout_hours} ساعة (مضاعفة للمخالفة رقم {v_count})"
-                
-                try:
-                    duration = datetime.timedelta(hours=timeout_hours)
-                    await message.author.timeout(duration, reason=f"مخالفة رقم {v_count}: {violation_type}")
-                except Exception as e:
-                    print(f"❌ خطأ في تطبيق التايم آوت: {e}")
+        # إذا وصل عدد المخالفات لـ 4 مرات -> تحويل للحجر إضافة للتايم آوت
+        if v_count >= 4:
+            try:
+                jail_role = discord.utils.get(guild.roles, name="محجور")
+                if jail_role:
+                    jail_channel = discord.utils.get(guild.text_channels, name="quarantine-zone")
+                    if not jail_channel:
+                        overwrites = {
+                            guild.default_role: discord.PermissionOverwrite(view_channel=False),
+                            jail_role: discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True)
+                        }
+                        jail_channel = await guild.create_text_channel("quarantine-zone", overwrites=overwrites)
+                    
+                    saved_roles[user_id] = [r for r in message.author.roles if r != guild.default_role and r != jail_role]
+                    await message.author.edit(roles=[jail_role], reason=f"تكرار المخالفات ({v_count} مرات)")
+                    action_taken += "\n🔒 تم إعطاؤه رتبة محجور بسبب تكرار المخالفات (4+)."
+            except Exception as e:
+                print(f"❌ خطأ في تطبيق الحجر: {e}")
 
-        # إرسال سجل المخالفة إلى روم المراجعة
+        # إرسال تقرير المخالفة فوراً لروم admin-review
         admin_channel = discord.utils.get(guild.text_channels, name="admin-review")
         if admin_channel:
             embed = discord.Embed(
