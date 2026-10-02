@@ -1,8 +1,5 @@
 """
-main.py -- الإصدار 6.3
-لا يوجد بان في أي مكان
-السب/الشتم/Anti-Nuke/Anti-Phishing = حجر دائم
-الروابط/السبام/منشن = تايم آوت ساعة
+main.py -- الإصدار 6.4 (بعد إصلاح Anti-Nuke)
 """
 import os
 import re
@@ -28,7 +25,6 @@ except ImportError:
         pass
 
 
-# ==================== التسجيل ====================
 os.makedirs(config.LOGS_DIR, exist_ok=True)
 
 logging.basicConfig(
@@ -43,14 +39,12 @@ logging.basicConfig(
 log = logging.getLogger("bot")
 
 
-# ==================== المجلدات ====================
 for d in [config.DATA_DIR, config.BACKUPS_DIR,
           config.ICONS_DIR, config.BANNERS_DIR, config.LOGS_DIR,
           config.CARDS_DIR]:
     os.makedirs(d, exist_ok=True)
 
 
-# ==================== النوايا ====================
 intents = discord.Intents.default()
 intents.message_content = True
 intents.guilds = True
@@ -60,7 +54,6 @@ intents.voice_states = True
 bot = commands.Bot(command_prefix="!nobotprefix!", intents=intents, help_command=None)
 
 
-# ==================== الحالة ====================
 VOICE_CHANNEL_ID: int = 0
 USER_WARNINGS: dict = {}
 saved_roles: dict = {}
@@ -75,8 +68,6 @@ NUKE_TRACKER: dict = defaultdict(lambda: defaultdict(lambda: defaultdict(deque))
 NUKE_STRIKES: dict = defaultdict(lambda: defaultdict(int))
 RATE_LIMIT_TRACKER: dict = defaultdict(lambda: defaultdict(deque))
 
-
-# ==================== أدوات JSON ====================
 
 def _read_json(path: str, default):
     if not os.path.exists(path):
@@ -102,8 +93,6 @@ def _write_json(path: str, data) -> None:
 async def async_save_json(path: str, data) -> None:
     await asyncio.to_thread(_write_json, path, data)
 
-
-# ==================== البحث الذكي ====================
 
 def find_role(guild: discord.Guild, cfg: dict) -> Optional[discord.Role]:
     if cfg.get("id"):
@@ -161,8 +150,6 @@ def find_channel(guild: discord.Guild, cfg: dict,
     return None
 
 
-# ==================== اختصارات ====================
-
 def get_role_jail(g):
     return find_role(g, config.ROLE_JAIL)
 
@@ -218,8 +205,6 @@ def get_cat_ticket(g):
     return find_channel(g, config.CH_TICKET_CATEGORY, "category")
 
 
-# ==================== تحميل وحفظ الحالة ====================
-
 def load_all_state() -> None:
     global USER_WARNINGS, saved_roles, protected_users_list
     global protected_roles_list, deputy_user_ids, VOICE_CHANNEL_ID
@@ -272,8 +257,6 @@ async def save_nuke_strikes() -> None:
     await async_save_json(config.ANTINUKE_FILE, data)
 
 
-# ==================== تطبيع النص ====================
-
 _TASHKEEL_RE = re.compile(r'[\u0617-\u061A\u064B-\u0652]')
 _LEET_MAP = str.maketrans({
     '@': 'a', '$': 's', '0': 'o', '1': 'i', '3': 'e',
@@ -309,8 +292,6 @@ URL_REGEX = re.compile(
 )
 
 
-# ==================== الصلاحيات ====================
-
 def is_owner(user_id: int) -> bool:
     return user_id == config.BOT_OWNER_ID
 
@@ -323,19 +304,30 @@ def has_control(user_id: int) -> bool:
     return is_owner(user_id) or is_deputy(user_id)
 
 
-def is_exempted(member: discord.Member) -> bool:
-    if not isinstance(member, discord.Member):
+def is_exempted(member) -> bool:
+    """يفحص إذا كان العضو مستثنى من كل الحمايات (يدعم Member و User)"""
+    if member is None:
         return False
-    if is_owner(member.id) or is_deputy(member.id):
+
+    user_id = member.id
+
+    if is_owner(user_id) or is_deputy(user_id):
         return True
-    if member.guild and member.id == member.guild.owner_id:
+
+    if isinstance(member, discord.Member):
+        if member.guild and user_id == member.guild.owner_id:
+            return True
+        protected_ids = set(protected_roles_list)
+        if any(r.id in protected_ids for r in member.roles):
+            return True
+
+    if user_id in protected_users_list:
         return True
-    if member.id in protected_users_list:
+
+    if getattr(member, "bot", False) and user_id in trusted_bots:
         return True
-    if member.bot and member.id in trusted_bots:
-        return True
-    protected_ids = set(protected_roles_list)
-    return any(r.id in protected_ids for r in member.roles)
+
+    return False
 
 
 async def require_control(interaction: discord.Interaction) -> bool:
@@ -361,8 +353,6 @@ async def require_owner(interaction: discord.Interaction) -> bool:
     )
     return False
 
-
-# ==================== فحص ترتيب الرتب ====================
 
 def can_act_on(actor: discord.Member, target: discord.Member,
                guild: discord.Guild):
@@ -404,8 +394,6 @@ def bot_can_manage(target, guild: discord.Guild):
     return True, ""
 
 
-# ==================== Rate Limiting ====================
-
 def check_rate_limit(user_id: int, command: str):
     if command not in config.RATE_LIMITS:
         return True, 0
@@ -439,10 +427,6 @@ def cleanup_spam_tracker():
         if SPAM_TRACKER[uid][1] < cutoff:
             del SPAM_TRACKER[uid]
 
-
-# ============================================================
-# نظام الحجر
-# ============================================================
 
 async def get_or_create_jail_channel(guild: discord.Guild,
                                      jail_role: discord.Role):
@@ -541,10 +525,6 @@ async def remove_jail(guild: discord.Guild, member: discord.Member):
     await save_state()
     return True, "تم فك الحجر واستعادة الرتب."
 
-
-# ============================================================
-# Anti-Nuke
-# ============================================================
 
 def _now() -> float:
     return time.time()
@@ -1070,10 +1050,12 @@ async def on_guild_channel_delete(channel: discord.abc.GuildChannel):
 
     executor = await get_audit_executor(guild, discord.AuditLogAction.channel_delete, channel.id)
 
+    # لو البوت نفسه أو المالك أو النائب أو محمي -> لا استرجاع ولا عقوبة
     if executor and (executor.id == bot.user.id or is_exempted(executor)):
-        await restore_channel_from_cache(guild, channel.id)
+        log.info("حذف روم بواسطة مستثنى (%s) -- تم التجاهل", executor)
         return
 
+    # فقط لو شخص غير مستثنى -> استرجع + عاقب
     await restore_channel_from_cache(guild, channel.id)
 
     if executor:
@@ -1171,10 +1153,13 @@ async def on_guild_role_delete(role: discord.Role):
     await asyncio.sleep(0.7)
     executor = await get_audit_executor(guild, discord.AuditLogAction.role_delete, role.id)
 
-    await restore_role_from_cache(guild, role.id)
-
+    # لو البوت نفسه أو المالك أو النائب أو محمي -> لا استرجاع ولا عقوبة
     if executor and (executor.id == bot.user.id or is_exempted(executor)):
+        log.info("حذف رتبة بواسطة مستثنى (%s) -- تم التجاهل", executor)
         return
+
+    # فقط لو شخص غير مستثنى -> استرجع + لوق + عقوبة
+    await restore_role_from_cache(guild, role.id)
 
     log_ch = get_ch_log_roles(guild)
     if log_ch:
@@ -1448,10 +1433,6 @@ async def on_audit_log_entry_create(entry: discord.AuditLogEntry):
         )
 
 
-# ============================================================
-# حماية السيرفر
-# ============================================================
-
 @bot.event
 async def on_guild_update(before: discord.Guild, after: discord.Guild):
     guild = after
@@ -1520,10 +1501,6 @@ async def on_guild_update(before: discord.Guild, after: discord.Guild):
                                     discord.Color.green(),
                                     {"بواسطة": executor.mention})
 
-
-# ============================================================
-# الأحداث العامة
-# ============================================================
 
 @bot.event
 async def on_member_join(member: discord.Member):
@@ -1641,10 +1618,6 @@ async def on_message_delete(message: discord.Message):
     except Exception:
         pass
 
-
-# ============================================================
-# كشف المخالفات
-# ============================================================
 
 def detect_violation(message: discord.Message):
     raw = message.content or ""
@@ -2610,10 +2583,6 @@ async def on_ready():
                 except Exception as e:
                     log.warning("فشل الاتصال الصوتي: %s", e)
 
-
-# ============================================================
-# تحميل الإضافات
-# ============================================================
 
 def load_extras_module():
     try:
