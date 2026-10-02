@@ -1,5 +1,5 @@
 """
-main.py -- الإصدار 6.3 (نظيف)
+main.py -- الإصدار 6.3
 لا يوجد بان في أي مكان
 السب/الشتم/Anti-Nuke/Anti-Phishing = حجر دائم
 الروابط/السبام/منشن = تايم آوت ساعة
@@ -692,7 +692,7 @@ async def handle_nuke_event(guild: discord.Guild, member: Optional[discord.Membe
         title="Anti-Nuke: تم كشف نشاط تخريبي",
         color=discord.Color.dark_red(),
         fields={
-            "المخالف": member.mention + " (`" + str(member.id) + "`)",
+            "المخالف": member.mention + " (" + str(member.id) + ")",
             "العملية": action,
             "عدد العمليات": str(count) + " خلال " + str(config.ANTI_NUKE_THRESHOLDS[action]["seconds"]) + " ثانية",
             "الهدف": target_desc,
@@ -700,7 +700,8 @@ async def handle_nuke_event(guild: discord.Guild, member: Optional[discord.Membe
         },
     )
 
-    clear_user_tracker(guild.id, member.id, action)# ============================================================
+    clear_user_tracker(guild.id, member.id, action)
+                                # ============================================================
 # النسخ الاحتياطية
 # ============================================================
 
@@ -1789,7 +1790,7 @@ async def on_voice_state_update(member: discord.Member,
                     await channel.connect()
                 except Exception as e:
                     log.warning("فشل إعادة الاتصال الصوتي: %s", e)
-# ============================================================
+                    # ============================================================
 # Views
 # ============================================================
 
