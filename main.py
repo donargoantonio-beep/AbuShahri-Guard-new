@@ -2795,13 +2795,72 @@ async def on_ready():
 # 🚀 نقطة البداية
 # ============================================================
 
+# ============================================================
+# 🚀 تحميل الإضافات
+# ============================================================
+
+def load_extras_module():
+    """يحمل extras.py ويمررتركة"""
+    try:
+        import extras
+
+        shared = {
+            # التحميل والحفظ
+            "save_warnings": save_warnings,
+            "save_state": save_state,
+
+            # الصلاحيات
+            "require_control": require_control,
+            "require_owner": require_owner,
+            "is_exempted": is_exempted,
+            "can_act_on": can_act_on,
+
+            # Rate Limiting
+            "check_rate_limit": check_rate_limit,
+
+            # الحجر
+            "apply_jail": apply_jail,
+            "remove_jail": remove_jail,
+
+            # الرومات
+            "get_ch_admin_review": get_ch_admin_review,
+            "get_ch_jail": get_ch_jail,
+            "get_ch_welcome": get_ch_welcome,
+            "get_ch_announce": get_ch_announce,
+
+            # الكاش والنسخ الاحتياطية
+            "cache_full_guild": cache_full_guild,
+            "backup_guild_name": backup_guild_name,
+            "backup_guild_icon": backup_guild_icon,
+            "backup_guild_banner": backup_guild_banner,
+
+            # الحالة المشتركة
+            "USER_WARNINGS": USER_WARNINGS,
+        }
+
+        extras.load_extras(bot, shared)
+        log.info("✅ تم تحميل extras.py بنجاح")
+    except ImportError as e:
+        log.warning(f"⚠️ extras.py غير موجود — تم تجاهل الإضافات: {e}")
+    except Exception as e:
+        log.exception(f"❌ خطأ في تحميل extras.py: {e}")
+
+
 def main():
     load_all_state()
     keep_alive()
+
+    # ✅ تحميل الإضافات
+    load_extras_module()
+
     token = os.getenv("DISCORD_TOKEN")
     if not token:
         raise SystemExit("❌ متغير DISCORD_TOKEN غير موجود!")
     bot.run(token, log_handler=None)
+
+
+if __name__ == "__main__":
+    main()
 
 
 if __name__ == "__main__":
