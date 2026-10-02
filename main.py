@@ -1,10 +1,12 @@
 """
-╔══════════════════════════════════════════════════════════╗
-║  main.py — بوت إدارة وحماية متقدم                       ║
-║  الإصدار: 4.0                                            ║
-║  الميزات: Anti-Nuke، Anti-Role/Channel Delete،          ║
-║          نسخ احتياطية، Rate Limiting، تحذير متدرج       ║
-╚══════════════════════════════════════════════════════════╝
+╔══════════════════════════════════════════════════════════════╗
+║  main.py — الإصدار 6.2                                      ║
+║  - لا يوجد بان (Ban) في أي مكان                             ║
+║  - السب/الشتم = حجر دائم                                    ║
+║  - Anti-Phishing = حجر دائم                                 ║
+║  - Anti-Nuke = حجر دائم                                     ║
+║  - الروابط/السبام/منشن = تايم آوت ساعة                      ║
+╚══════════════════════════════════════════════════════════════╝
 """
 import os
 import re
@@ -23,7 +25,6 @@ from discord.ui import View, Button, Modal, TextInput
 
 import config
 
-# keep_alive اختياري (لسيرفرات Replit)
 try:
     from keep_alive import keep_alive
 except ImportError:
@@ -31,7 +32,7 @@ except ImportError:
         pass
 
 
-# ==================== إعداد التسجيل ====================
+# ==================== التسجيل ====================
 os.makedirs(config.LOGS_DIR, exist_ok=True)
 
 logging.basicConfig(
@@ -46,7 +47,7 @@ logging.basicConfig(
 log = logging.getLogger("bot")
 
 
-# ==================== إنشاء المجلدات ====================
+# ==================== المجلدات ====================
 for d in [config.DATA_DIR, config.BACKUPS_DIR,
           config.ICONS_DIR, config.BANNERS_DIR, config.LOGS_DIR]:
     os.makedirs(d, exist_ok=True)
@@ -63,7 +64,7 @@ intents.moderation = True
 bot = commands.Bot(command_prefix="!nobotprefix!", intents=intents, help_command=None)
 
 
-# ==================== الحالة العامة ====================
+# ==================== الحالة ====================
 VOICE_CHANNEL_ID: int = 0
 USER_WARNINGS: dict = {}
 saved_roles: dict = {}
@@ -74,13 +75,8 @@ trusted_bots: list = []
 SPAM_TRACKER: dict = {}
 SPAM_CLEANUP_LAST = 0.0
 
-# Anti-Nuke trackers: {guild_id: {user_id: {action: deque[timestamps]}}}
 NUKE_TRACKER: dict = defaultdict(lambda: defaultdict(lambda: defaultdict(deque)))
-
-# سجل النيوكات لكل مستخدم: {guild_id: {user_id: count}}
 NUKE_STRIKES: dict = defaultdict(lambda: defaultdict(int))
-
-# Rate limiting: {user_id: {command: deque[timestamps]}}
 RATE_LIMIT_TRACKER: dict = defaultdict(lambda: defaultdict(deque))
 
 
@@ -199,12 +195,12 @@ def load_all_state() -> None:
     global protected_roles_list, deputy_user_ids, VOICE_CHANNEL_ID
     global trusted_bots, NUKE_STRIKES
 
-    raw = _read_json(config.WARNINGS_FILE, {})
+    raw =async _read_json(config.WARNINGS_FILE, {})
     USER_WARNINGS = {int(k): v for k, v in raw.items()}
 
-    state = _read_json(config.STATE_FILE, {})
-    protected_users_list = state.get("protected_users", [])
-    protected_roles_list = state.get("protected_roles", [])
+    state = _read_json(config.STATE_FILE, { def})
+    protected_users_list = state.get("protected_users", save [])
+    protected_roles_list =_w state.get("protected_roles", [])
     deputy_user_ids = state.get("deputies", [])
     trusted_bots = state.get("trusted_bots", [])
     VOICE_CHANNEL_ID = state.get("voice_channel_id", 0)
@@ -225,11 +221,9 @@ def load_all_state() -> None:
     )
 
 
-async def save_warnings() -> None:
-    await async_save_json(
-        config.WARNINGS_FILE,
-        {str(k): v for k, v in USER_WARNINGS.items()}
-    )
+arnings() -> None:
+    await async_save_json(config.WARNINGS_FILE,
+                          {str(k): v for k, v in USER_WARNINGS.items()})
 
 
 async def save_state() -> None:
@@ -250,7 +244,7 @@ async def save_nuke_strikes() -> None:
     await async_save_json(config.ANTINUKE_FILE, data)
 
 
-# ==================== تطبيع النص (للكلمات المحظورة) ====================
+# ==================== تطبيع النص ====================
 
 _TASHKEEL_RE = re.compile(r'[\u0617-\u061A\u064B-\u0652]')
 _LEET_MAP = str.maketrans({
@@ -298,12 +292,10 @@ def is_deputy(user_id: int) -> bool:
 
 
 def has_control(user_id: int) -> bool:
-    """المالك أو النائب"""
     return is_owner(user_id) or is_deputy(user_id)
 
 
 def is_exempted(member: discord.Member) -> bool:
-    """استثناء من كل الحمايات"""
     if not isinstance(member, discord.Member):
         return False
     if is_owner(member.id) or is_deputy(member.id):
@@ -319,7 +311,6 @@ def is_exempted(member: discord.Member) -> bool:
 
 
 async def require_control(interaction: discord.Interaction) -> bool:
-    """يتحقق أن المستخدم مالك أو نائب"""
     if has_control(interaction.user.id):
         return True
     if interaction.guild and interaction.user.id == interaction.guild.owner_id:
@@ -332,7 +323,6 @@ async def require_control(interaction: discord.Interaction) -> bool:
 
 
 async def require_owner(interaction: discord.Interaction) -> bool:
-    """يتحقق أن المستخدم مالك فقط"""
     if is_owner(interaction.user.id):
         return True
     if interaction.guild and interaction.user.id == interaction.guild.owner_id:
@@ -348,29 +338,17 @@ async def require_owner(interaction: discord.Interaction) -> bool:
 
 def can_act_on(actor: discord.Member, target: discord.Member,
                guild: discord.Guild) -> tuple[bool, str]:
-    """
-    يتحقق أن البوت يقدر يعاقب target.
-    يرجع (يمكن؟, سبب الفشل)
-    """
     me = guild.me
 
-    # البوت نفسه
     if target.id == me.id:
         return False, "❌ لا أستطيع معاقبة نفسي."
-
-    # المالك
     if target.id == guild.owner_id:
         return False, "❌ لا يمكن معاقبة مالك السيرفر."
-
-    # محمي
     if is_exempted(target):
         return False, "❌ هذا العضو محمي من الحمايات."
-
-    # ترتيب الرتب: البوت لازم أعلى من الهدف
     if target.top_role >= me.top_role:
         return False, f"❌ رتبة {target.mention} أعلى أو تساوي رتبة البوت."
 
-    # الفاعل لازم أعلى من الهدف (لو الفاعل عضو)
     if isinstance(actor, discord.Member) and actor.id != me.id:
         if not is_owner(actor.id) and not is_deputy(actor.id):
             if actor.guild and actor.id != actor.guild.owner_id:
@@ -382,7 +360,6 @@ def can_act_on(actor: discord.Member, target: discord.Member,
 
 def bot_can_manage(target: Union[discord.Member, discord.Role],
                    guild: discord.Guild) -> tuple[bool, str]:
-    """يتحقق أن البوت يقدر يعدل على الهدف"""
     me = guild.me
 
     if isinstance(target, discord.Member):
@@ -403,10 +380,6 @@ def bot_can_manage(target: Union[discord.Member, discord.Role],
 # ==================== Rate Limiting ====================
 
 def check_rate_limit(user_id: int, command: str) -> tuple[bool, int]:
-    """
-    يفحص هل المستخدم تجاوز الحد.
-    يرجع (مسموح؟, كم ثانية ينتظر)
-    """
     if command not in config.RATE_LIMITS:
         return True, 0
 
@@ -417,7 +390,6 @@ def check_rate_limit(user_id: int, command: str) -> tuple[bool, int]:
     now = time.time()
     dq = RATE_LIMIT_TRACKER[user_id][command]
 
-    # احذف القديم
     while dq and now - dq[0] > window:
         dq.popleft()
 
@@ -429,8 +401,6 @@ def check_rate_limit(user_id: int, command: str) -> tuple[bool, int]:
     return True, 0
 
 
-# ==================== تنظيف SPAM_TRACKER ====================
-
 def cleanup_spam_tracker():
     global SPAM_CLEANUP_LAST
     now = time.time()
@@ -441,13 +411,14 @@ def cleanup_spam_tracker():
     for uid in list(SPAM_TRACKER.keys()):
         if SPAM_TRACKER[uid][1] < cutoff:
             del SPAM_TRACKER[uid]
+
+
 # ============================================================
-# 🚔 نظام الحجر الموحّد
+# 🚔 نظام الحجر
 # ============================================================
 
 async def get_or_create_jail_channel(guild: discord.Guild,
                                      jail_role: discord.Role) -> Optional[discord.TextChannel]:
-    """يرجع روم الحجر. لو ما لقاه، ينشئه كحل أخير."""
     channel = get_ch_jail(guild)
 
     if channel is None:
@@ -478,16 +449,11 @@ async def get_or_create_jail_channel(guild: discord.Guild,
 
 async def apply_jail(guild: discord.Guild, member: discord.Member,
                      reason: str) -> tuple[bool, str]:
-    """
-    يطبّق الحجر: يسحب الرتب، يعطيه رتبة محجور، يخرجه من الرومات الصوتية.
-    يفحص ترتيب الرتب أولاً.
-    """
     if is_exempted(member):
         return False, "❌ هذا العضو محمي، لا يمكن حجره."
     if not isinstance(member, discord.Member):
         return False, "❌ العضو غير موجود في السيرفر."
 
-    # فحص ترتيب الرتب
     ok, why = bot_can_manage(member, guild)
     if not ok:
         return False, f"❌ لا أستطيع حجر {member.mention}: {why}"
@@ -496,7 +462,6 @@ async def apply_jail(guild: discord.Guild, member: discord.Member,
     if not jail_role:
         return False, "❌ لم أجد رتبة `محجور`. أضف آيديها في config.py."
 
-    # فحص ترتيب رتبة المحجور نفسها
     if jail_role >= guild.me.top_role:
         return False, "❌ رتبة `محجور` أعلى من رتبة البوت. ارفع رتبة البوت فوقها."
 
@@ -521,13 +486,12 @@ async def apply_jail(guild: discord.Guild, member: discord.Member,
     except discord.Forbidden:
         return False, "❌ البوت لا يملك صلاحية تعديل رتب هذا العضو."
     except Exception as e:
-        log.exception("خطأ في apply_jail")
+        log.exception("خطأ في apply2_jail")
         return False, f"❌ فشل الحجر: {e}"
 
 
-async def remove_jail(guild: discord.Guild, member: discord.Member) -> tuple[bool, str]:
-    """فك الحجر: يعيد الرتب المحفوظة، يمسح رتبة المحجور."""
-    jail_role = get_role_jail(guild)
+async def remove_jail(guild:+ discord.Guild, member: discord.Member) -> → tuple[bool, str]:
+    jail_role = get_role ح_jail(guild)
     if jail_role and jail_role in member.roles:
         try:
             await member.remove_roles(jail_role)
@@ -539,7 +503,7 @@ async def remove_jail(guild: discord.Guild, member: discord.Member) -> tuple[boo
         roles_to_restore = []
         for rid in role_ids:
             r = guild.get_role(rid)
-            if r and r < guild.me.top_role:  # فحص الترتيب
+            if r and r < guild.me.top_role:
                 roles_to_restore.append(r)
         if roles_to_restore:
             try:
@@ -552,7 +516,7 @@ async def remove_jail(guild: discord.Guild, member: discord.Member) -> tuple[boo
 
 
 # ============================================================
-# 🛡️ Anti-Nuke — النظام الكامل
+# 🛡️ Anti-Nuke
 # ============================================================
 
 def _now() -> float:
@@ -560,16 +524,12 @@ def _now() -> float:
 
 
 def _prune_deque(dq: deque, window: int):
-    """يحذف العناصر القديمة من الطابور"""
     cutoff = _now() - window
     while dq and dq[0] < cutoff:
         dq.popleft()
 
 
 def record_action(guild_id: int, user_id: int, action: str) -> int:
-    """
-    يسجّل عملية جديدة ويرجع عدد العمليات خلال الفترة المسموحة.
-    """
     if action not in config.ANTI_NUKE_THRESHOLDS:
         return 0
 
@@ -583,7 +543,6 @@ def record_action(guild_id: int, user_id: int, action: str) -> int:
 
 
 def is_nuke(guild_id: int, user_id: int, action: str) -> bool:
-    """هل المستخدم تجاوز الحد؟"""
     if action not in config.ANTI_NUKE_THRESHOLDS:
         return False
     limit = config.ANTI_NUKE_THRESHOLDS[action]
@@ -593,7 +552,6 @@ def is_nuke(guild_id: int, user_id: int, action: str) -> bool:
 
 
 def clear_user_tracker(guild_id: int, user_id: int, action: Optional[str] = None):
-    """يمسح سجل عمليات المستخدم (بعد معاقبته)"""
     if guild_id not in NUKE_TRACKER:
         return
     if user_id not in NUKE_TRACKER[guild_id]:
@@ -608,11 +566,9 @@ async def get_audit_executor(guild: discord.Guild,
                              action: discord.AuditLogAction,
                              target_id: int,
                              limit: int = 5) -> Optional[discord.Member]:
-    """يحاول معرفة من نفّذ العملية من audit log"""
     try:
         async for entry in guild.audit_logs(limit=limit, action=action):
             if entry.target and entry.target.id == target_id:
-                # تحقق أن العملية حديثة (خلال 15 ثانية)
                 age = (discord.utils.utcnow() - entry.created_at).total_seconds()
                 if age < 15:
                     return entry.user
@@ -625,7 +581,6 @@ async def get_audit_executor(guild: discord.Guild,
 
 async def send_nuke_log(guild: discord.Guild, title: str, color: discord.Color,
                         fields: dict):
-    """يرسل تقرير نيوك لروم اللوق"""
     log_ch = get_ch_log_nuke(guild) or get_ch_admin_review(guild)
     if not log_ch:
         return
@@ -641,10 +596,8 @@ async def send_nuke_log(guild: discord.Guild, title: str, color: discord.Color,
 async def punish_nuker(guild: discord.Guild, member: discord.Member,
                        action: str, count: int) -> str:
     """
-    يطبّق العقوبة بناءً على نظام التحذير المتدرج.
-    - أول نيك: تحذير بالخاص
-    - ثاني نيك: سحب رتب + حجر
-    - ثالث نيك: بان نهائي
+    - أول نيك:  تحذير بالخاص
+    - ثاني نيك وأكثر: حجر دائم
     """
     if member is None:
         return "❌ لم أعرف من نفّذ العملية."
@@ -653,14 +606,12 @@ async def punish_nuker(guild: discord.Guild, member: discord.Member,
     if is_exempted(member):
         return "⚠️ العضو محمي — لم تُطبَّق العقوبة."
 
-    # زيادة عدّاد النيوكات
     NUKE_STRIKES[guild.id][member.id] += 1
     strikes = NUKE_STRIKES[guild.id][member.id]
     await save_nuke_strikes()
 
     reason = f"Anti-Nuke: {action} (المرة {strikes})"
 
-    # تحذير متدرج
     if config.GRADUATED_NUKE_PUNISHMENT:
         if strikes == 1:
             try:
@@ -669,33 +620,20 @@ async def punish_nuker(guild: discord.Guild, member: discord.Member,
                     f"تم كشف نشاط تخريبي منك في **{guild.name}**\n"
                     f"العملية: `{action}`\n"
                     f"عدد العمليات: `{count}`\n\n"
-                    f"⚠️ **تحذير:** تكرار النشاط = سحب الرتب + حجر"
+                    f"⚠️ **تحذير:** تكرار النشاط = حجر دائم"
                 )
             except Exception:
                 pass
             return f"⚠️ تحذير أول لـ {member.mention} (نيك #1)"
 
-        elif strikes == 2:
+        else:  # جر دائم
             ok, msg = await apply_jail(guild, member, reason)
-            return f"🔒 حجر لـ {member.mention} (نيك #2) — {msg}"
-
-        else:  # 3+
-            try:
-                await member.ban(reason=f"{reason} — نهائي", delete_message_days=0)
-                return f"🔨 بان نهائي لـ {member.mention} (نيك #{strikes})"
-            except Exception as e:
-                return f"❌ فشل البان: {e}"
+            return f"🔒 حجر دائم لـ {member.mention} (نيك #{strikes}) — {msg}"
 
     # عقوبة عادية (بدون تدرج)
     if config.ANTI_NUKE_PUNISHMENT == "jail":
         ok, msg = await apply_jail(guild, member, reason)
         return f"🔒 {msg}"
-    elif config.ANTI_NUKE_PUNISHMENT == "ban":
-        try:
-            await member.ban(reason=reason, delete_message_days=0)
-            return f"🔨 بان {member.mention}"
-        except Exception as e:
-            return f"❌ فشل البان: {e}"
 
     return "✅ عُوقب"
 
@@ -703,15 +641,9 @@ async def punish_nuker(guild: discord.Guild, member: discord.Member,
 async def handle_nuke_event(guild: discord.Guild, member: Optional[discord.Member],
                             action: str, target_desc: str,
                             restore_func=None):
-    """
-    المعالج المركزي لأي حدث نيوك.
-    - يسجّل العملية
-    - يفحص العتبة
-    - لو تجاوز: يستعيد + يعاقب
-    """
     if not config.ANTI_NUKE_ENABLED:
         return
-    if member is None or member.bot and member.id in trusted_bots:
+    if member is None or (member.bot and member.id in trusted_bots):
         return
     if member and is_exempted(member):
         return
@@ -722,22 +654,18 @@ async def handle_nuke_event(guild: discord.Guild, member: Optional[discord.Membe
     count = record_action(guild.id, member.id, action)
 
     if not is_nuke(guild.id, member.id, action):
-        return  # لسا ما تجاوز الحد
+        return
 
-    # 🚨 نيك مكتشف!
     log.warning(f"🚨 NUKE detected: {member} → {action} × {count}")
 
-    # استرجاع ما يمكن استرجاعه
     if restore_func:
         try:
             await restore_func()
         except Exception as e:
             log.exception(f"فشل الاسترجاع: {e}")
 
-    # عقوبة
     punishment = await punish_nuker(guild, member, action, count)
 
-    # لوق
     await send_nuke_log(
         guild,
         title="🚨 Anti-Nuke: تم كشف نشاط تخريبي",
@@ -751,12 +679,11 @@ async def handle_nuke_event(guild: discord.Guild, member: Optional[discord.Membe
         },
     )
 
-    # امسح سجل عملياته
     clear_user_tracker(guild.id, member.id, action)
 
 
 # ============================================================
-# 📦 نظام النسخ الاحتياطية (اسم/أيقونة/بانر السيرفر)
+# 📦 النسخ الاحتياطية
 # ============================================================
 
 def _backup_meta_load() -> dict:
@@ -772,7 +699,6 @@ def _backup_meta_save(data: dict) -> None:
 
 
 def _add_to_history(lst: list, value, max_len: int):
-    """يضيف قيمة لقائمة مع منع التكرار والحد الأقصى"""
     if value in lst:
         lst.remove(value)
     lst.insert(0, value)
@@ -780,7 +706,6 @@ def _add_to_history(lst: list, value, max_len: int):
 
 
 def backup_guild_name(guild: discord.Guild):
-    """يحفظ اسم السيرفر"""
     if not config.BACKUP_ENABLED:
         return
     meta = _backup_meta_load()
@@ -789,7 +714,6 @@ def backup_guild_name(guild: discord.Guild):
 
 
 async def backup_guild_icon(guild: discord.Guild):
-    """يحفظ أيقونة السيرفر (الرابط + الملف محلياً)"""
     if not config.BACKUP_ENABLED:
         return
     if not guild.icon:
@@ -799,7 +723,6 @@ async def backup_guild_icon(guild: discord.Guild):
         filename = f"{guild.id}_{int(_now())}.png"
         filepath = os.path.join(config.ICONS_DIR, filename)
 
-        # تحميل الصورة
         async with bot.http._HTTPClient__session.get(guild.icon.url) as resp:
             if resp.status == 200:
                 data = await resp.read()
@@ -813,7 +736,6 @@ async def backup_guild_icon(guild: discord.Guild):
             "timestamp": int(_now()),
         }, config.BACKUP_MAX_ICONS)
 
-        # احذف الملفات القديمة الزائدة
         if len(meta["icons"]) > config.BACKUP_MAX_ICONS:
             for old in meta["icons"][config.BACKUP_MAX_ICONS:]:
                 old_path = os.path.join(config.ICONS_DIR, old["file"])
@@ -829,7 +751,6 @@ async def backup_guild_icon(guild: discord.Guild):
 
 
 async def backup_guild_banner(guild: discord.Guild):
-    """يحفظ بانر السيرفر"""
     if not config.BACKUP_ENABLED:
         return
     if not guild.banner:
@@ -866,19 +787,14 @@ async def backup_guild_banner(guild: discord.Guild):
         log.warning(f"فشل حفظ البانر: {e}")
 
 
-async def restore_guild_name(guild: discord.Guild,
-                             save_current: bool = True) -> tuple[bool, str]:
-    """يرجع آخر اسم محفوظ"""
+async def restore_guild_name(guild: discord.Guild) -> tuple[bool, str]:
     meta = _backup_meta_load()
     if len(meta["names"]) < 2:
         return False, "❌ لا يوجد اسم قديم محفوظ."
 
-    previous = meta["names"][1]  # [0] هو الحالي
+    previous = meta["names"][1]
 
     try:
-        if save_current:
-            # احفظ الاسم الحالي قبل الرجوع
-            pass
         await guild.edit(name=previous, reason="Anti-Nuke: استرجاع الاسم")
         return True, f"✅ تم استرجاع الاسم: `{previous}`"
     except discord.Forbidden:
@@ -888,7 +804,6 @@ async def restore_guild_name(guild: discord.Guild,
 
 
 async def restore_guild_icon(guild: discord.Guild) -> tuple[bool, str]:
-    """يرجع آخر أيقونة محفوظة"""
     meta = _backup_meta_load()
     if len(meta["icons"]) < 2:
         return False, "❌ لا توجد أيقونة قديمة محفوظة."
@@ -910,7 +825,6 @@ async def restore_guild_icon(guild: discord.Guild) -> tuple[bool, str]:
 
 
 async def restore_guild_banner(guild: discord.Guild) -> tuple[bool, str]:
-    """يرجع آخر بانر محفوظ"""
     meta = _backup_meta_load()
     if len(meta["banners"]) < 2:
         return False, "❌ لا يوجد بانر قديم محفوظ."
@@ -929,17 +843,16 @@ async def restore_guild_banner(guild: discord.Guild) -> tuple[bool, str]:
         return False, "❌ لا أملك صلاحية تعديل بانر السيرفر."
     except Exception as e:
         return False, f"❌ فشل الاسترجاع: {e}"
-# ============================================================
-# 🗂️ Cache للرومات والرتب (لاسترجاعها عند الحذف)
+        # ============================================================
+# 🗂️ Cache للرومات والرتب
 # ============================================================
 
-GUILD_CACHE_FILE = "data/guild_cache.json"
 GUILD_CACHE: dict = defaultdict(lambda: {"channels": {}, "roles": {}})
 
 
 def load_guild_cache():
     global GUILD_CACHE
-    raw = _read_json(GUILD_CACHE_FILE, {})
+    raw = _read_json(config.GUILD_CACHE_FILE, {})
     GUILD_CACHE = defaultdict(lambda: {"channels": {}, "roles": {}})
     for gid, data in raw.items():
         GUILD_CACHE[int(gid)] = {
@@ -953,18 +866,16 @@ async def save_guild_cache():
         "channels": {str(k): v for k, v in d["channels"].items()},
         "roles": {str(k): v for k, v in d["roles"].items()},
     } for gid, d in GUILD_CACHE.items()}
-    await async_save_json(GUILD_CACHE_FILE, data)
+    await async_save_json(config.GUILD_CACHE_FILE, data)
 
 
 def snapshot_channel(channel: discord.abc.GuildChannel) -> dict:
-    """يأخذ لقطة من بيانات روم"""
     base = {
         "name": channel.name,
         "position": channel.position,
         "category_id": channel.category_id,
     }
 
-    # overwrites
     overwrites = {}
     for target, ow in channel.overwrites.items():
         allow, deny = ow.pair()
@@ -998,7 +909,6 @@ def snapshot_channel(channel: discord.abc.GuildChannel) -> dict:
 
 
 def snapshot_role(role: discord.Role) -> dict:
-    """يأخذ لقطة من بيانات رتبة"""
     return {
         "name": role.name,
         "color": role.color.value,
@@ -1007,14 +917,10 @@ def snapshot_role(role: discord.Role) -> dict:
         "hoist": role.hoist,
         "mentionable": role.mentionable,
         "unicode_emoji": role.unicode_emoji,
-        "icon_url": role.icon.url if role.icon else None,
-        "is_bot_managed": role.is_bot_managed(),
-        "is_premium": role.is_premium_subscriber(),
     }
 
 
 def rebuild_overwrites(guild: discord.Guild, overwrites_data: dict) -> dict:
-    """يعيد بناء Overwrites من البيانات"""
     result = {}
     for tid_str, ow in overwrites_data.items():
         tid = int(tid_str)
@@ -1029,7 +935,6 @@ def rebuild_overwrites(guild: discord.Guild, overwrites_data: dict) -> dict:
 
 
 async def cache_full_guild(guild: discord.Guild):
-    """يأخذ لقطة كاملة من السيرفر عند البدء"""
     channels_data = {}
     for ch in guild.channels:
         channels_data[ch.id] = snapshot_channel(ch)
@@ -1040,11 +945,11 @@ async def cache_full_guild(guild: discord.Guild):
         roles_data[r.id] = snapshot_role(r)
     GUILD_CACHE[guild.id] = {"channels": channels_data, "roles": roles_data}
     await save_guild_cache()
-    log.info(f"📸 لقطة كاملة للسيرفر: {guild.name} ({len(channels_data)} روم، {len(roles_data)} رتبة)")
+    log.info(f"📸 لقطة كاملة: {guild.name} ({len(channels_data)} روم، {len(roles_data)} رتبة)")
 
 
-async def restore_channel_from_cache(guild: discord.Guild, ch_id: int) -> Optional[discord.abc.GuildChannel]:
-    """يعيد إنشاء روم محذوف من الـ cache"""
+async def restore_channel_from_cache(guild: discord.Guild,
+                                     ch_id: int) -> Optional[discord.abc.GuildChannel]:
     cache = GUILD_CACHE.get(guild.id)
     if not cache or ch_id not in cache["channels"]:
         return None
@@ -1085,7 +990,6 @@ async def restore_channel_from_cache(guild: discord.Guild, ch_id: int) -> Option
         else:
             return None
 
-        # حدّث الـ cache بالآيدي الجديد
         cache["channels"][new_ch.id] = snapshot_channel(new_ch)
         if ch_id in cache["channels"]:
             del cache["channels"][ch_id]
@@ -1096,8 +1000,8 @@ async def restore_channel_from_cache(guild: discord.Guild, ch_id: int) -> Option
         return None
 
 
-async def restore_role_from_cache(guild: discord.Guild, role_id: int) -> Optional[discord.Role]:
-    """يعيد إنشاء رتبة محذوفة من الـ cache"""
+async def restore_role_from_cache(guild: discord.Guild,
+                                  role_id: int) -> Optional[discord.Role]:
     cache = GUILD_CACHE.get(guild.id)
     if not cache or role_id not in cache["roles"]:
         return None
@@ -1113,7 +1017,6 @@ async def restore_role_from_cache(guild: discord.Guild, role_id: int) -> Optiona
             unicode_emoji=data.get("unicode_emoji"),
             reason="Anti-Nuke: استرجاع رتبة",
         )
-        # حاول رفعها للموضع الأصلي
         try:
             await new_role.edit(position=data.get("position", new_role.position))
         except Exception:
@@ -1130,7 +1033,7 @@ async def restore_role_from_cache(guild: discord.Guild, role_id: int) -> Optiona
 
 
 # ============================================================
-# 🚨 Events — Anti-Nuke
+# 🚨 Anti-Nuke Events
 # ============================================================
 
 @bot.event
@@ -1138,26 +1041,19 @@ async def on_guild_channel_delete(channel: discord.abc.GuildChannel):
     guild = channel.guild
     await asyncio.sleep(0.7)
 
-    # امسحه من الـ cache
     cache = GUILD_CACHE.get(guild.id, {})
     cached_data = cache.get("channels", {}).get(channel.id, snapshot_channel(channel))
-
-    # احفظ اللقطة قبل الحذف (channel object لسا موجود)
     GUILD_CACHE[guild.id]["channels"][channel.id] = cached_data
     await save_guild_cache()
 
     executor = await get_audit_executor(guild, discord.AuditLogAction.channel_delete, channel.id)
 
-    # لو البوت نفسه أو محمي
     if executor and (executor.id == bot.user.id or is_exempted(executor)):
-        # استرجاع بدون عقوبة
         await restore_channel_from_cache(guild, channel.id)
         return
 
-    # استرجع الروم فوراً (بغض النظر عن العتبة)
     await restore_channel_from_cache(guild, channel.id)
 
-    # سجّل العملية
     if executor:
         await handle_nuke_event(
             guild, executor, "channel_delete",
@@ -1167,7 +1063,7 @@ async def on_guild_channel_delete(channel: discord.abc.GuildChannel):
         await send_nuke_log(
             guild, "⚠️ حذف روم (بدون معرفة الفاعل)",
             discord.Color.orange(),
-            {"الروم المحذوف": f"`{channel.name}`", "ملاحظة": "لم أتمكن من قراءة audit log"},
+            {"الروم المحذوف": f"`{channel.name}`"},
         )
 
 
@@ -1175,7 +1071,6 @@ async def on_guild_channel_delete(channel: discord.abc.GuildChannel):
 async def on_guild_channel_create(channel: discord.abc.GuildChannel):
     guild = channel.guild
 
-    # حدّث الـ cache
     GUILD_CACHE[guild.id]["channels"][channel.id] = snapshot_channel(channel)
     await save_guild_cache()
 
@@ -1198,16 +1093,12 @@ async def on_guild_channel_update(before: discord.abc.GuildChannel,
                                   after: discord.abc.GuildChannel):
     guild = after.guild
 
-    # حدّث الـ cache
     GUILD_CACHE[guild.id]["channels"][after.id] = snapshot_channel(after)
     await save_guild_cache()
 
-    # لوق تعديل الرومات (فقط التغييرات المهمة)
     changes = []
     if before.name != after.name:
         changes.append(f"الاسم: `{before.name}` → `{after.name}`")
-    if isinstance(before, discord.TextChannel) and before.topic != after.topic:
-        changes.append(f"الموضوع تغيّر")
     if before.category_id != after.category_id:
         changes.append(f"القسم تغيّر")
 
@@ -1236,10 +1127,7 @@ async def on_guild_channel_update(before: discord.abc.GuildChannel,
         return
 
     if executor:
-        await handle_nuke_event(
-            guild, executor, "channel_update",
-            f"`{after.name}`",
-        )
+        await handle_nuke_event(guild, executor, "channel_update", f"`{after.name}`")
 
 
 @bot.event
@@ -1249,20 +1137,17 @@ async def on_guild_role_delete(role: discord.Role):
     if role.is_default() or role.managed:
         return
 
-    # احفظ اللقطة
     GUILD_CACHE[guild.id]["roles"][role.id] = snapshot_role(role)
     await save_guild_cache()
 
     await asyncio.sleep(0.7)
     executor = await get_audit_executor(guild, discord.AuditLogAction.role_delete, role.id)
 
-    # استرجع الرتبة
     await restore_role_from_cache(guild, role.id)
 
     if executor and (executor.id == bot.user.id or is_exempted(executor)):
         return
 
-    # لوق
     log_ch = get_ch_log_roles(guild)
     if log_ch:
         embed = discord.Embed(title="🗑️ حذف رتبة",
@@ -1277,10 +1162,7 @@ async def on_guild_role_delete(role: discord.Role):
             pass
 
     if executor:
-        await handle_nuke_event(
-            guild, executor, "role_delete",
-            f"`{role.name}`",
-        )
+        await handle_nuke_event(guild, executor, "role_delete", f"`{role.name}`")
 
 
 @bot.event
@@ -1314,9 +1196,7 @@ async def on_guild_role_update(before: discord.Role, after: discord.Role):
     if after.is_default() or after.managed:
         return
 
-    # فحص الصلاحيات
     if before.permissions != after.permissions:
-        # رتبة محمية؟ استرجع
         if after.id in protected_roles_list:
             try:
                 await after.edit(
@@ -1326,7 +1206,6 @@ async def on_guild_role_update(before: discord.Role, after: discord.Role):
             except Exception as e:
                 log.warning(f"فشل إرجاع الرتبة المحمية: {e}")
 
-            # لوق
             log_ch = get_ch_log_roles(guild)
             if log_ch:
                 embed = discord.Embed(title="🛡️ محاولة تعديل رتبة محمية",
@@ -1336,9 +1215,11 @@ async def on_guild_role_update(before: discord.Role, after: discord.Role):
                 executor = await get_audit_executor(guild, discord.AuditLogAction.role_update, after.id)
                 if executor:
                     embed.add_field(name="بواسطة", value=executor.mention, inline=False)
-                await log_ch.send(embed=embed)
+                try:
+                    await log_ch.send(embed=embed)
+                except Exception:
+                    pass
 
-    # لوق التعديلات
     changes = []
     if before.name != after.name:
         changes.append(f"الاسم: `{before.name}` → `{after.name}`")
@@ -1365,7 +1246,6 @@ async def on_guild_role_update(before: discord.Role, after: discord.Role):
             except Exception:
                 pass
 
-    # حدّث الـ cache
     GUILD_CACHE[guild.id]["roles"][after.id] = snapshot_role(after)
     await save_guild_cache()
 
@@ -1376,10 +1256,7 @@ async def on_guild_role_update(before: discord.Role, after: discord.Role):
         return
 
     if executor:
-        await handle_nuke_event(
-            guild, executor, "role_update",
-            f"`{after.name}`",
-        )
+        await handle_nuke_event(guild, executor, "role_update", f"`{after.name}`")
 
 
 @bot.event
@@ -1387,10 +1264,9 @@ async def on_member_ban(guild: discord.Guild, user: discord.User):
     await asyncio.sleep(0.7)
     executor = await get_audit_executor(guild, discord.AuditLogAction.ban, user.id)
 
-    # لوق الباند
     log_ch = get_ch_log_ban(guild)
     if log_ch:
-        embed = discord.Embed(title="🔨 حظر عضو",
+        embed = discord.Embed(title="🔨 حظر عضو (يدوي)",
                               color=discord.Color.dark_magenta(),
                               timestamp=discord.utils.utcnow())
         embed.add_field(name="العضو", value=f"{user.mention} (`{user.id}`)", inline=False)
@@ -1405,7 +1281,8 @@ async def on_member_ban(guild: discord.Guild, user: discord.User):
         return
 
     if executor:
-        async def unban():
+        # فك البان + حجر المخرب
+        async def unban_and_jail():
             try:
                 await guild.unban(user, reason="Anti-Nuke: إلغاء بان تخريبي")
                 log.info(f"تم فك البان عن {user}")
@@ -1415,23 +1292,18 @@ async def on_member_ban(guild: discord.Guild, user: discord.User):
         await handle_nuke_event(
             guild, executor, "ban",
             f"{user.mention} (`{user.id}`)",
-            restore_func=unban,
+            restore_func=unban_and_jail,
         )
 
 
 @bot.event
 async def on_member_remove(member: discord.Member):
     guild = member.guild
-
-    # تجاهل إذا كان بان (on_member_ban يشتغل قبل هذا أحياناً)
     await asyncio.sleep(1.0)
 
     executor = await get_audit_executor(guild, discord.AuditLogAction.kick, member.id)
 
     if executor:
-        # هذا كيك وليس مغادرة عادية
-
-        # لوق الكيك
         log_ch = get_ch_log_ban(guild)
         if log_ch:
             embed = discord.Embed(title="👞 طرد عضو (Kick)",
@@ -1447,13 +1319,11 @@ async def on_member_remove(member: discord.Member):
         if executor.id == bot.user.id or is_exempted(executor):
             return
 
-        # محاولة إرسال دعوة للعضو المطروود
-        async def reinvite():
+        async def notify():
             try:
                 await member.send(
                     f"⚠️ تم طردك من **{guild.name}** بشكل تخريبي.\n"
-                    f"البوت حاول حمايتك.\n"
-                    f"يمكنك العودة عبر رابط الدعوة إن كان متاحاً."
+                    f"البوت حاول حمايتك."
                 )
             except Exception:
                 pass
@@ -1461,11 +1331,10 @@ async def on_member_remove(member: discord.Member):
         await handle_nuke_event(
             guild, executor, "kick",
             f"{member.mention} (`{member.id}`)",
-            restore_func=reinvite,
+            restore_func=notify,
         )
         return
 
-    # مغادرة عادية — لوق الدخول/الخروج
     log_ch = get_ch_log_join_leave(guild)
     if log_ch:
         embed = discord.Embed(title="📤 عضو غادر",
@@ -1481,10 +1350,8 @@ async def on_member_remove(member: discord.Member):
 
 @bot.event
 async def on_audit_log_entry_create(entry: discord.AuditLogEntry):
-    """يستخدم لكشف إضافة البوتات والـ Webhooks"""
     guild = entry.guild
 
-    # كشف إضافة بوت
     if entry.action == discord.AuditLogAction.bot_add:
         target = entry.target
         if not isinstance(target, discord.Member):
@@ -1492,7 +1359,6 @@ async def on_audit_log_entry_create(entry: discord.AuditLogEntry):
         if is_exempted(entry.user):
             return
 
-        # لوق
         log_ch = get_ch_log_guild(guild) or get_ch_admin_review(guild)
         if log_ch:
             embed = discord.Embed(title="🤖 إضافة بوت",
@@ -1505,7 +1371,6 @@ async def on_audit_log_entry_create(entry: discord.AuditLogEntry):
             except Exception:
                 pass
 
-        # لو البوت غير موثوق، اطرده + عاقب اللي أضافه
         if target.id not in trusted_bots:
             try:
                 await target.kick(reason="Anti-Nuke: بوت غير موثوق")
@@ -1517,7 +1382,6 @@ async def on_audit_log_entry_create(entry: discord.AuditLogEntry):
                 f"{target} (`{target.id}`)",
             )
 
-    # كشف إنشاء Webhook
     elif entry.action == discord.AuditLogAction.webhook_create:
         if is_exempted(entry.user):
             return
@@ -1527,20 +1391,20 @@ async def on_audit_log_entry_create(entry: discord.AuditLogEntry):
             embed = discord.Embed(title="🔗 إنشاء Webhook",
                                   color=discord.Color.orange(),
                                   timestamp=discord.utils.utcnow())
-            embed.add_field(name="القناة", value=entry.target, inline=False)
+            embed.add_field(name="القناة", value=str(entry.target), inline=False)
             embed.add_field(name="بواسطة", value=entry.user.mention, inline=False)
             try:
                 await log_ch.send(embed=embed)
             except Exception:
                 pass
 
-        # حاول حذف الـ webhook
         async def del_webhook():
             try:
-                webhooks = await entry.target.webhooks()
-                for wh in webhooks:
-                    if wh.user and wh.user.id == entry.user.id:
-                        await wh.delete(reason="Anti-Nuke: webhook مشبوه")
+                if hasattr(entry.target, "webhooks"):
+                    webhooks = await entry.target.webhooks()
+                    for wh in webhooks:
+                        if wh.user and wh.user.id == entry.user.id:
+                            await wh.delete(reason="Anti-Nuke: webhook مشبوه")
             except Exception:
                 pass
 
@@ -1552,14 +1416,13 @@ async def on_audit_log_entry_create(entry: discord.AuditLogEntry):
 
 
 # ============================================================
-# 🏰 حماية السيرفر (اسم/أيقونة/بانر)
+# 🏰 حماية السيرفر
 # ============================================================
 
 @bot.event
 async def on_guild_update(before: discord.Guild, after: discord.Guild):
     guild = after
 
-    # اسم السيرفر
     if before.name != after.name:
         log_ch = get_ch_log_guild(guild)
         if log_ch:
@@ -1577,7 +1440,6 @@ async def on_guild_update(before: discord.Guild, after: discord.Guild):
         executor = await get_audit_executor(guild, discord.AuditLogAction.guild_update, guild.id)
 
         if executor and not is_exempted(executor) and executor.id != bot.user.id:
-            # احفظ الاسم القديم قبل الرجوع
             ok, msg = await restore_guild_name(guild)
             if ok:
                 await send_nuke_log(guild, "🛡️ استرجاع اسم السيرفر",
@@ -1585,11 +1447,7 @@ async def on_guild_update(before: discord.Guild, after: discord.Guild):
                                     {"الاسم الأصلي": f"`{before.name}`",
                                      "بواسطة": executor.mention})
 
-    # أيقونة السيرفر
     if before.icon != after.icon:
-        # احفظ الأيقونة الجديدة إن كانت موجودة، لكن قبل ما نرجّع القديمة
-        # الأفضل نحفظ القديمة أولاً قبل ما تنحذف — نستخدم اللقطة المخزنة
-
         log_ch = get_ch_log_guild(guild)
         if log_ch:
             embed = discord.Embed(title="🖼️ تغيير أيقونة السيرفر",
@@ -1600,7 +1458,6 @@ async def on_guild_update(before: discord.Guild, after: discord.Guild):
             except Exception:
                 pass
 
-        # حاول استرجاع الأيقونة القديمة
         await asyncio.sleep(1)
         executor = await get_audit_executor(guild, discord.AuditLogAction.guild_update, guild.id)
         if executor and not is_exempted(executor) and executor.id != bot.user.id:
@@ -1610,7 +1467,6 @@ async def on_guild_update(before: discord.Guild, after: discord.Guild):
                                     discord.Color.green(),
                                     {"بواسطة": executor.mention})
 
-    # بانر السيرفر
     if before.banner != after.banner:
         log_ch = get_ch_log_guild(guild)
         if log_ch:
@@ -1633,14 +1489,13 @@ async def on_guild_update(before: discord.Guild, after: discord.Guild):
 
 
 # ============================================================
-# 👋 الترحيب والرسائل واللوقات العادية
+# 👋 الأحداث العامة
 # ============================================================
 
 @bot.event
 async def on_member_join(member: discord.Member):
     guild = member.guild
 
-    # ترحيب بالخاص
     try:
         invite_url = None
         try:
@@ -1667,12 +1522,11 @@ async def on_member_join(member: discord.Member):
     except Exception as e:
         log.warning(f"فشل إرسال الترحيب: {e}")
 
-    # روم الترحيب
     welcome_ch = get_ch_welcome(guild)
     if welcome_ch:
         embed = discord.Embed(
             title="🎉 عضو جديد!",
-            description=f"مرحباً {member.mention} في **{guild.name}**!\nنتمنى لك وقتاً ممتعاً.",
+            description=f"مرحباً {member.mention} في **{guild.name}**!",
             color=discord.Color.brand_green(),
         )
         embed.set_thumbnail(url=member.display_avatar.url)
@@ -1681,7 +1535,6 @@ async def on_member_join(member: discord.Member):
         except Exception:
             pass
 
-    # لوق الدخول
     log_ch = get_ch_log_join_leave(guild)
     if log_ch:
         embed = discord.Embed(title="📥 عضو انضم",
@@ -1698,7 +1551,6 @@ async def on_member_join(member: discord.Member):
 
 @bot.event
 async def on_member_update(before: discord.Member, after: discord.Member):
-    # تغيير الرتب
     if before.roles != after.roles:
         log_ch = get_ch_log_roles(after.guild)
         if log_ch:
@@ -1721,7 +1573,6 @@ async def on_member_update(before: discord.Member, after: discord.Member):
             except Exception:
                 pass
 
-    # تغيير اللقب
     if before.nick != after.nick:
         log_ch = get_ch_log_nickname(after.guild)
         if log_ch:
@@ -1759,7 +1610,7 @@ async def on_message_delete(message: discord.Message):
 
 
 # ============================================================
-# 💬 نظام كشف المخالفات (سب/روابط/سبام)
+# 💬 كشف المخالفات (سب/روابط/سبام)
 # ============================================================
 
 def detect_violation(message: discord.Message) -> Optional[str]:
@@ -1829,9 +1680,16 @@ async def on_message(message: discord.Message):
 
     action_taken = ""
 
+    # ============================================================
+    # 🎯 السب/الشتم = حجر دائم
+    # ============================================================
     if violation == "السب والشتم / ألفاظ نابية":
         ok, msg = await apply_jail(guild, member, f"مخالفة: {violation}")
-        action_taken = f"{msg} (حجر فوري)"
+        action_taken = f"{msg} (حجر دائم)"
+
+    # ============================================================
+    # 🎯 الروابط/السبام/منشن = تايم آوت ساعة
+    # ============================================================
     else:
         try:
             until = discord.utils.utcnow() + datetime.timedelta(hours=1)
@@ -1844,7 +1702,7 @@ async def on_message(message: discord.Message):
 
         if warn_count >= 3:
             ok, msg = await apply_jail(guild, member, f"بلوغ {warn_count} تحذيرات")
-            action_taken += f"\n{msg}"
+            action_taken += f"\n{msg} (حجر دائم)"
 
     await save_warnings()
 
@@ -1881,7 +1739,6 @@ async def on_message(message: discord.Message):
 async def on_voice_state_update(member: discord.Member,
                                 before: discord.VoiceState,
                                 after: discord.VoiceState):
-    # طرد المحجورين من الرومات الصوتية
     jail_role = get_role_jail(member.guild)
     if jail_role and jail_role in member.roles and after.channel is not None:
         try:
@@ -1890,7 +1747,6 @@ async def on_voice_state_update(member: discord.Member,
             pass
         return
 
-    # إعادة اتصال البوت
     if VOICE_CHANNEL_ID == 0 or member.id != bot.user.id:
         return
     if before.channel and before.channel.id == VOICE_CHANNEL_ID:
@@ -1910,7 +1766,7 @@ async def on_voice_state_update(member: discord.Member,
 
 
 # ============================================================
-# 🎫 الواجهات (Views/Modals)
+# 🎫 Views
 # ============================================================
 
 class ApplicationModal(Modal, title="نموذج التقديم للإدارة"):
@@ -1944,7 +1800,7 @@ class ApplicationButtonView(View):
         super().__init__(timeout=None)
 
     @discord.ui.button(label="تقديم على الإدارة", style=discord.ButtonStyle.green,
-                       custom_id="apply_button_permanent_v4")
+                       custom_id="apply_button_permanent_v6")
     async def apply_button(self, interaction: discord.Interaction, button: Button):
         await interaction.response.send_modal(ApplicationModal())
 
@@ -1962,7 +1818,7 @@ class AdminDecisionView(View):
         return False
 
     @discord.ui.button(label="قبول", style=discord.ButtonStyle.blurple,
-                       custom_id="accept_app_btn_v4")
+                       custom_id="accept_app_btn_v6")
     async def accept_app(self, interaction: discord.Interaction, button: Button):
         if not await self._check_perm(interaction):
             return
@@ -1976,7 +1832,7 @@ class AdminDecisionView(View):
         )
 
     @discord.ui.button(label="رفض", style=discord.ButtonStyle.red,
-                       custom_id="reject_app_btn_v4")
+                       custom_id="reject_app_btn_v6")
     async def reject_app(self, interaction: discord.Interaction, button: Button):
         if not await self._check_perm(interaction):
             return
@@ -1995,7 +1851,7 @@ class CloseTicketButton(View):
         super().__init__(timeout=None)
 
     @discord.ui.button(label="إغلاق التذكرة 🔒", style=discord.ButtonStyle.red,
-                       custom_id="close_ticket_btn_v4")
+                       custom_id="close_ticket_btn_v6")
     async def close_ticket(self, interaction: discord.Interaction, button: Button):
         role = get_role_ticket(interaction.guild)
         if not ((role and role in interaction.user.roles) or has_control(interaction.user.id)):
@@ -2014,25 +1870,21 @@ class TicketButtonView(View):
         super().__init__(timeout=None)
 
     @discord.ui.button(label="فتح تذكرة 🎫", style=discord.ButtonStyle.primary,
-                       custom_id="open_ticket_btn_v4")
+                       custom_id="open_ticket_btn_v6")
     async def open_ticket(self, interaction: discord.Interaction, button: Button):
         guild = interaction.guild
         category = get_cat_ticket(guild)
         if not category:
             await interaction.response.send_message(
-                "❌ لم أجد تصنيف `التذاكر`. أنشئه أو أضف آيديه في config.py.",
-                ephemeral=True,
+                "❌ لم أجد تصنيف `التذاكر`.", ephemeral=True
             )
             return
 
-        # ⭐ استخدام ID العضو في اسم التذكرة (يمنع فتح أكثر من تذكرة بتغيير الاسم)
         channel_name = f"ticket-{interaction.user.id}"
 
-        # ⭐ فحص قوي: ابحث عن أي تذكرة فيها آيدي المستخدم
         existing = None
         for ch in category.text_channels:
             if ch.name == channel_name or str(interaction.user.id) in ch.name:
-                # تأكد أن المستخدم لا يزال عنده صلاحية الوصول
                 if ch.permissions_for(interaction.user).view_channel:
                     existing = ch
                     break
@@ -2074,12 +1926,14 @@ class TicketButtonView(View):
         await interaction.response.send_message(
             f"✅ تم فتح تذكرتك: {ch.mention}", ephemeral=True
         )
+
+
 # ============================================================
-# 🎯 الأوامر — إدارة عامة
+# 🎯 الأوامر
 # ============================================================
 
 @bot.tree.command(name="فحص_الاعدادات",
-                  description="يفحص وجود جميع الرومات والرتب ويرشدك للناقص")
+                  description="يفحص وجود جميع الرومات والرتب")
 async def check_setup(interaction: discord.Interaction):
     if not await require_control(interaction):
         return
@@ -2114,6 +1968,7 @@ async def check_setup(interaction: discord.Interaction):
         ("روم الترحيب", get_ch_welcome(guild), config.CH_WELCOME),
         ("روم الإعلانات", get_ch_announce(guild), config.CH_ANNOUNCE),
         ("تصنيف التذاكر", get_cat_ticket(guild), config.CH_TICKET_CATEGORY),
+        ("روم الإحصائيات", guild.get_channel(config.CH_STATS.get("id")), config.CH_STATS),
     ]
     for label, found, cfg in channel_checks:
         if found:
@@ -2129,11 +1984,9 @@ async def check_setup(interaction: discord.Interaction):
     )
 
     if missing:
-        embed.add_field(
-            name="⚠️ ناقص",
-            value="\n".join(f"• {m}" for m in missing[:10]),
-            inline=False,
-        )
+        embed.add_field(name="⚠️ ناقص",
+                        value="\n".join(f"• {m}" for m in missing[:10]),
+                        inline=False)
         embed.set_footer(text="💡 أضف الآيدي مباشرة في config.py")
     else:
         embed.add_field(name="✅", value="كل الإعدادات جاهزة!", inline=False)
@@ -2152,7 +2005,6 @@ async def test_protection(interaction: discord.Interaction):
 
     checks = []
 
-    # صلاحيات البوت
     perms_needed = [
         ("manage_roles", "إدارة الرتب"),
         ("manage_channels", "إدارة الرومات"),
@@ -2169,7 +2021,6 @@ async def test_protection(interaction: discord.Interaction):
         else:
             checks.append(f"❌ صلاحية ناقصة: **{label}**")
 
-    # ترتيب رتبة البوت
     jail_role = get_role_jail(guild)
     if jail_role:
         if jail_role < me.top_role:
@@ -2177,30 +2028,20 @@ async def test_protection(interaction: discord.Interaction):
         else:
             checks.append(f"❌ رتبة البوت ليست أعلى من `{jail_role.name}`")
 
-    # الـ cache
     cache = GUILD_CACHE.get(guild.id, {})
     ch_count = len(cache.get("channels", {}))
     rl_count = len(cache.get("roles", {}))
     checks.append(f"📦 Cache: **{ch_count}** روم / **{rl_count}** رتبة")
 
-    # Anti-Nuke
     if config.ANTI_NUKE_ENABLED:
-        checks.append(f"✅ Anti-Nuke: **مفعّل** ({len(config.ANTI_NUKE_THRESHOLDS)} حدث مراقب)")
+        checks.append(f"✅ Anti-Nuke: مفعّل ({len(config.ANTI_NUKE_THRESHOLDS)} حدث)")
     else:
-        checks.append("⚠️ Anti-Nuke: **معطّل**")
+        checks.append("⚠️ Anti-Nuke: معطّل")
 
-    # اللوقات
-    log_missing = []
-    for label, ch in [
-        ("النيوك", get_ch_log_nuke(guild)),
-        ("حماية السيرفر", get_ch_log_guild(guild)),
-    ]:
-        if not ch:
-            log_missing.append(label)
-    if log_missing:
-        checks.append(f"⚠️ لوقات ناقصة: {', '.join(log_missing)}")
-    else:
-        checks.append("✅ كل اللوقات الجديدة موجودة")
+    if config.ANTI_PHISHING_ENABLED:
+        checks.append("✅ Anti-Phishing: مفعّل")
+    if config.AUTOMOD_ENABLED:
+        checks.append("✅ Auto-Mod: مفعّل")
 
     embed = discord.Embed(
         title="🧪 اختبار الحماية",
@@ -2209,10 +2050,6 @@ async def test_protection(interaction: discord.Interaction):
     )
     await interaction.followup.send(embed=embed, ephemeral=True)
 
-
-# ============================================================
-# 🎯 الأوامر — العقوبات
-# ============================================================
 
 @bot.tree.command(name="طرد", description="طرد عضو")
 @discord.app_commands.describe(member="العضو", reason="السبب")
@@ -2283,7 +2120,7 @@ async def warn_cmd(interaction: discord.Interaction, member: discord.Member,
     if warn_count >= 3:
         ok, msg = await apply_jail(interaction.guild, member,
                                    f"بلوغ {warn_count} تحذيرات")
-        jailed_msg = f"\n{msg}"
+        jailed_msg = f"\n{msg} (حجر دائم)"
 
     admin_ch = get_ch_admin_review(interaction.guild)
     if admin_ch:
@@ -2323,7 +2160,7 @@ async def check_warnings_cmd(interaction: discord.Interaction, member: discord.M
     await interaction.response.send_message(embed=embed, ephemeral=True)
 
 
-@bot.tree.command(name="حجر", description="حجر عضو")
+@bot.tree.command(name="حجر", description="حجر دائم لعضو")
 @discord.app_commands.describe(member="العضو", reason="السبب")
 async def jail_cmd(interaction: discord.Interaction, member: discord.Member,
                    reason: str = "لم يُحدد"):
@@ -2335,11 +2172,12 @@ async def jail_cmd(interaction: discord.Interaction, member: discord.Member,
         return
 
     ok, msg = await apply_jail(interaction.guild, member,
-                               f"حجر يدوي بواسطة {interaction.user}: {reason}")
+                               f"حجر دائم بواسطة {interaction.user}: {reason}")
     if ok:
         admin_ch = get_ch_admin_review(interaction.guild)
         if admin_ch:
-            embed = discord.Embed(title="🔒 حجر عضو", color=discord.Color.dark_red(),
+            embed = discord.Embed(title="🔒 حجر دائم",
+                                  color=discord.Color.dark_red(),
                                   timestamp=discord.utils.utcnow())
             embed.add_field(name="العضو", value=member.mention, inline=False)
             embed.add_field(name="بواسطة", value=interaction.user.mention, inline=False)
@@ -2400,10 +2238,6 @@ async def reset_nuke_cmd(interaction: discord.Interaction, member: discord.Membe
             f"ℹ️ لا يوجد سجل نيوكات لـ {member.mention}.", ephemeral=True
         )
 
-
-# ============================================================
-# 🎯 الأوامر — الحماية
-# ============================================================
 
 @bot.tree.command(name="تعيين_نائب", description="[المالك] تعيين نائب")
 @discord.app_commands.describe(member="العضو")
@@ -2487,22 +2321,6 @@ async def unprotect_role_cmd(interaction: discord.Interaction, role: discord.Rol
     await interaction.response.send_message(f"🔓 أُزيلت حماية {role.mention}.", ephemeral=True)
 
 
-@bot.tree.command(name="حماية_روم", description="إضافة روم لقائمة الرومات المحمية")
-@discord.app_commands.describe(channel="الروم")
-async def protect_channel_cmd(interaction: discord.Interaction,
-                              channel: discord.abc.GuildChannel):
-    if not await require_control(interaction):
-        return
-    if channel.id in config.PROTECTED_CHANNELS:
-        await interaction.response.send_message("⚠️ محمي مسبقاً.", ephemeral=True)
-        return
-    config.PROTECTED_CHANNELS.append(channel.id)
-    await interaction.response.send_message(
-        f"🛡️ تم حماية {channel.mention} (لحين إعادة التشغيل فقط — أضفه في config.py للدائم).",
-        ephemeral=True,
-    )
-
-
 @bot.tree.command(name="قائمة_الحماية", description="عرض قوائم الحماية")
 async def protection_dashboard_cmd(interaction: discord.Interaction):
     embed = discord.Embed(title="🛡️ لوحة الحماية", color=discord.Color.gold())
@@ -2559,10 +2377,6 @@ async def untrust_bot_cmd(interaction: discord.Interaction, bot_member: discord.
     )
 
 
-# ============================================================
-# 🎯 الأوامر — Anti-Nuke
-# ============================================================
-
 @bot.tree.command(name="anti_nuke", description="تفعيل/تعطيل نظام Anti-Nuke")
 @discord.app_commands.describe(state="on / off / status")
 async def antinuke_cmd(interaction: discord.Interaction, state: str = "status"):
@@ -2599,17 +2413,13 @@ async def antinuke_cmd(interaction: discord.Interaction, state: str = "status"):
         await interaction.response.send_message("❌ استخدم: on / off / status", ephemeral=True)
 
 
-# ============================================================
-# 🎯 الأوامر — النسخ الاحتياطية
-# ============================================================
-
-@bot.tree.command(name="اعادة_لقطه", description="أخذ لقطة جديدة من السيرفر (cache)")
+@bot.tree.command(name="اعادة_لقطه", description="أخذ لقطة جديدة من السيرفر")
 async def refresh_cache_cmd(interaction: discord.Interaction):
     if not await require_control(interaction):
         return
     await interaction.response.defer(ephemeral=True)
     await cache_full_guild(interaction.guild)
-    await backup_guild_name(interaction.guild)
+    backup_guild_name(interaction.guild)
     await backup_guild_icon(interaction.guild)
     await backup_guild_banner(interaction.guild)
     await interaction.followup.send(
@@ -2641,10 +2451,6 @@ async def restore_banner_cmd(interaction: discord.Interaction):
     await interaction.response.send_message(msg, ephemeral=True)
 
 
-# ============================================================
-# 🎯 الأوامر — الرومات الصوتية
-# ============================================================
-
 @bot.tree.command(name="روم_صوتي", description="تحديد روم صوتي دائم للبوت")
 @discord.app_commands.describe(voice_channel="الروم الصوتي")
 async def voice_cmd(interaction: discord.Interaction, voice_channel: discord.VoiceChannel):
@@ -2664,10 +2470,6 @@ async def voice_cmd(interaction: discord.Interaction, voice_channel: discord.Voi
     except Exception as e:
         await interaction.followup.send(f"❌ فشل الاتصال: {e}", ephemeral=True)
 
-
-# ============================================================
-# 🎯 الأوامر — عامة
-# ============================================================
 
 @bot.tree.command(name="مسح", description="حذف رسائل")
 @discord.app_commands.describe(amount="عدد الرسائل (1-100)")
@@ -2749,38 +2551,33 @@ async def owner_info_cmd(interaction: discord.Interaction):
 
 
 # ============================================================
-# 🎬 on_ready
+# 🎬 on_ready + main
 # ============================================================
 
 @bot.event
 async def on_ready():
     log.info(f"✅ البوت متصل: {bot.user} (ID: {bot.user.id})")
 
-    # تسجيل الواجهات الدائمة
     bot.add_view(TicketButtonView())
     bot.add_view(CloseTicketButton())
     bot.add_view(ApplicationButtonView())
 
-    # تحميل cache السيرفرات
     load_guild_cache()
     for guild in bot.guilds:
         try:
             await cache_full_guild(guild)
-            # حفظ نسخة من الاسم والأيقونة والبانر
             backup_guild_name(guild)
             await backup_guild_icon(guild)
             await backup_guild_banner(guild)
         except Exception as e:
             log.warning(f"فشل تهيئة {guild.name}: {e}")
 
-    # مزامنة الأوامر
     try:
         synced = await bot.tree.sync()
         log.info(f"تمت مزامنة {len(synced)} أمر slash")
     except Exception as e:
         log.error(f"فشل مزامنة الأوامر: {e}")
 
-    # الاتصال بالروم الصوتي
     if VOICE_CHANNEL_ID:
         for guild in bot.guilds:
             ch = guild.get_channel(VOICE_CHANNEL_ID)
@@ -2792,56 +2589,38 @@ async def on_ready():
 
 
 # ============================================================
-# 🚀 نقطة البداية
-# ============================================================
-
-# ============================================================
 # 🚀 تحميل الإضافات
 # ============================================================
 
 def load_extras_module():
-    """يحمل extras.py ويمررتركة"""
     try:
         import extras
 
         shared = {
-            # التحميل والحفظ
             "save_warnings": save_warnings,
             "save_state": save_state,
-
-            # الصلاحيات
             "require_control": require_control,
             "require_owner": require_owner,
             "is_exempted": is_exempted,
             "can_act_on": can_act_on,
-
-            # Rate Limiting
             "check_rate_limit": check_rate_limit,
-
-            # الحجر
             "apply_jail": apply_jail,
             "remove_jail": remove_jail,
-
-            # الرومات
             "get_ch_admin_review": get_ch_admin_review,
             "get_ch_jail": get_ch_jail,
             "get_ch_welcome": get_ch_welcome,
             "get_ch_announce": get_ch_announce,
-
-            # الكاش والنسخ الاحتياطية
             "cache_full_guild": cache_full_guild,
             "backup_guild_name": backup_guild_name,
             "backup_guild_icon": backup_guild_icon,
             "backup_guild_banner": backup_guild_banner,
-
-            # الحالة المشتركة
             "USER_WARNINGS": USER_WARNINGS,
         }
 
         extras.load_extras(bot, shared)
         log.info("✅ تم تحميل extras.py بنجاح")
     except ImportError as e:
-        log.warning(f"⚠️ extras.py غير موجود — تم تجاهل الإضافات: {e}")
+        log.warning(f"⚠️ extras.py غير موجود: {e}")
     except Exception as e:
         log.exception(f"❌ خطأ في تحميل extras.py: {e}")
 
@@ -2849,18 +2628,12 @@ def load_extras_module():
 def main():
     load_all_state()
     keep_alive()
-
-    # ✅ تحميل الإضافات
     load_extras_module()
 
     token = os.getenv("DISCORD_TOKEN")
     if not token:
         raise SystemExit("❌ متغير DISCORD_TOKEN غير موجود!")
     bot.run(token, log_handler=None)
-
-
-if __name__ == "__main__":
-    main()
 
 
 if __name__ == "__main__":
