@@ -205,7 +205,7 @@ TRUSTED_BOTS = []
 # 🎣 Anti-Phishing
 # ============================================================
 ANTI_PHISHING_ENABLED = True
-ANTI_PHISHING_PUNISH = "ban"
+ANTI_PHISHING_PUNISH = "jail"
 
 PHISHING_DOMAINS = [
     "discord-nitro.com", "discordnitro.com", "discord-gift.com",
