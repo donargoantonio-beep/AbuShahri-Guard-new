@@ -102,8 +102,10 @@ RATE_LIMIT_TRACKER: dict = defaultdict(lambda: defaultdict(deque))
 
 
 # ═══════════════════════════════════════════════════════════════
-# 💿 القسم 4: حفظ وقراءة JSON
+# 💿 القسم 4: حفظ وقراءة (JSON + MongoDB)
 # ═══════════════════════════════════════════════════════════════
+
+# ---------- (أ) أدوات JSON (تبقى للاستخدام المحلي) ----------
 
 def _read_json(path: str, default):
     """قراءة ملف JSON بأمان"""
@@ -131,6 +133,174 @@ def _write_json(path: str, data) -> None:
 async def async_save_json(path: str, data) -> None:
     """حفظ ملف JSON في thread منفصل (لا يحجب البوت)"""
     await asyncio.to_thread(_write_json, path, data)
+
+
+# ---------- (ب) MongoDB ----------
+
+# كائنات قاعدة البيانات (تُملأ عند التشغيل)
+_db = None
+_collections = {}
+
+
+async def init_mongodb() -> bool:
+    """الاتصال بـ MongoDB Atlas (يُستدعى من main)"""
+    global _db, _collections
+
+    if not config.MONGO_ENABLED:
+        log.warning("MongoDB غير مفعل -- سيتم استخدام ملفات JSON")
+        return False
+
+    try:
+        from motor.motor_asyncio import AsyncIOMotorClient
+
+        client = AsyncIOMotorClient(config.MONGO_URI, serverSelectionTimeoutMS=10000)
+        await client.admin.command("ping")
+        _db = client[config.MONGO_DB_NAME]
+
+        _collections = {
+            "state": _db["state"],
+            "warnings": _db["warnings"],
+            "antinuke": _db["antinuke"],
+            "reminders": _db["reminders"],
+            "temp_actions": _db["temp_actions"],
+            "guild_cache": _db["guild_cache"],
+            "backup_meta": _db["backup_meta"],
+        }
+        log.info("تم الاتصال بـ MongoDB Atlas بنجاح")
+        return True
+    except Exception as e:
+        log.error("فشل الاتصال بـ MongoDB: %s", e)
+        config.MONGO_ENABLED = False
+        return False
+
+
+async def mongo_read(name: str, default):
+    """قراءة مستند من MongoDB"""
+    if not config.MONGO_ENABLED or name not in _collections:
+        return default
+
+    try:
+        doc = await _collections[name].find_one({"_id": "main"})
+        if doc:
+            doc.pop("_id", None)
+            return doc
+        return default
+    except Exception as e:
+        log.error("فشل قراءة %s من MongoDB: %s", name, e)
+        return default
+
+
+async def mongo_save(name: str, data):
+    """حفظ مستند في MongoDB"""
+    if not config.MONGO_ENABLED or name not in _collections:
+        return
+
+    try:
+        await _collections[name].replace_one(
+            {"_id": "main"},
+            {"_id": "main", **data},
+            upsert=True,
+        )
+    except Exception as e:
+        log.error("فشل حفظ %s في MongoDB: %s", name, e)
+
+
+# ---------- (ج) دوال الحفظ الموحدة ----------
+
+async def save_warnings() -> None:
+    """حفظ سجل التحذيرات (MongoDB أو JSON)"""
+    data = {str(k): v for k, v in USER_WARNINGS.items()}
+    if config.MONGO_ENABLED:
+        await mongo_save("warnings", {"data": data})
+    else:
+        await async_save_json(config.WARNINGS_FILE, data)
+
+
+async def save_state() -> None:
+    """حفظ الحالة العامة (MongoDB أو JSON)"""
+    data = {
+        "protected_users": protected_users_list,
+        "protected_roles": protected_roles_list,
+        "deputies": deputy_user_ids,
+        "trusted_bots": trusted_bots,
+        "voice_channel_id": VOICE_CHANNEL_ID,
+        "saved_roles": {str(k): v for k, v in saved_roles.items()},
+    }
+    if config.MONGO_ENABLED:
+        await mongo_save("state", data)
+    else:
+        await async_save_json(config.STATE_FILE, data)
+
+
+async def save_nuke_strikes() -> None:
+    """حفظ سجل النيوكات (MongoDB أو JSON)"""
+    data = {str(gid): {str(uid): c for uid, c in users.items()}
+            for gid, users in NUKE_STRIKES.items()}
+    if config.MONGO_ENABLED:
+        await mongo_save("antinuke", {"data": data})
+    else:
+        await async_save_json(config.ANTINUKE_FILE, data)
+
+
+# ---------- (د) تحميل الحالة الكامل ----------
+
+async def load_all_state_async() -> None:
+    """تحميل كل البيانات (يدعم MongoDB + JSON)"""
+    global USER_WARNINGS, saved_roles, protected_users_list
+    global protected_roles_list, deputy_user_ids, VOICE_CHANNEL_ID
+    global trusted_bots, NUKE_STRIKES
+
+    if config.MONGO_ENABLED:
+        # ---------- MongoDB ----------
+        log.info("تحميل الحالة من MongoDB...")
+
+        # 1. التحذيرات
+        data = await mongo_read("warnings", {"data": {}})
+        USER_WARNINGS = {int(k): v for k, v in data.get("data", {}).items()}
+
+        # 2. الحالة العامة
+        state = await mongo_read("state", {})
+        protected_users_list = state.get("protected_users", [])
+        protected_roles_list = state.get("protected_roles", [])
+        deputy_user_ids = state.get("deputies", [])
+        trusted_bots = state.get("trusted_bots", [])
+        VOICE_CHANNEL_ID = state.get("voice_channel_id", 0)
+        saved_roles = {int(k): v for k, v in state.get("saved_roles", {}).items()}
+
+        # 3. النيوكات
+        strikes = await mongo_read("antinuke", {"data": {}})
+        NUKE_STRIKES = defaultdict(lambda: defaultdict(int))
+        for gid, users in strikes.get("data", {}).items():
+            for uid, count in users.items():
+                NUKE_STRIKES[int(gid)][int(uid)] = count
+
+        log.info("تم تحميل الحالة من MongoDB")
+    else:
+        # ---------- JSON (احتياطي) ----------
+        log.info("تحميل الحالة من ملفات JSON...")
+
+        raw = _read_json(config.WARNINGS_FILE, {})
+        USER_WARNINGS = {int(k): v for k, v in raw.items()}
+
+        state = _read_json(config.STATE_FILE, {})
+        protected_users_list = state.get("protected_users", [])
+        protected_roles_list = state.get("protected_roles", [])
+        deputy_user_ids = state.get("deputies", [])
+        trusted_bots = state.get("trusted_bots", [])
+        VOICE_CHANNEL_ID = state.get("voice_channel_id", 0)
+        saved_roles = {int(k): v for k, v in state.get("saved_roles", {}).items()}
+
+        strikes = _read_json(config.ANTINUKE_FILE, {})
+        NUKE_STRIKES = defaultdict(lambda: defaultdict(int))
+        for gid, users in strikes.items():
+            for uid, count in users.items():
+                NUKE_STRIKES[int(gid)][int(uid)] = count
+
+    log.info(
+        "الحالة | تحذيرات=%d | محميون=%d | رتب-محمية=%d | نواب=%d | بوتات=%d",
+        len(USER_WARNINGS), len(protected_users_list),
+        len(protected_roles_list), len(deputy_user_ids), len(trusted_bots),
+    )
     # ═══════════════════════════════════════════════════════════════
 # 🔍 القسم 5: البحث الذكي (رتب + رومات)
 # ═══════════════════════════════════════════════════════════════
@@ -262,69 +432,7 @@ def get_cat_ticket(g):
     return find_channel(g, config.CH_TICKET_CATEGORY, "category")
 
 
-# ═══════════════════════════════════════════════════════════════
-# 📥 القسم 6: تحميل وحفظ الحالة
-# ═══════════════════════════════════════════════════════════════
 
-def load_all_state() -> None:
-    """تحميل كل البيانات عند بدء البوت"""
-    global USER_WARNINGS, saved_roles, protected_users_list
-    global protected_roles_list, deputy_user_ids, VOICE_CHANNEL_ID
-    global trusted_bots, NUKE_STRIKES
-
-    # 1. التحذيرات
-    raw = _read_json(config.WARNINGS_FILE, {})
-    USER_WARNINGS = {int(k): v for k, v in raw.items()}
-
-    # 2. الحالة العامة
-    state = _read_json(config.STATE_FILE, {})
-    protected_users_list = state.get("protected_users", [])
-    protected_roles_list = state.get("protected_roles", [])
-    deputy_user_ids = state.get("deputies", [])
-    trusted_bots = state.get("trusted_bots", [])
-    VOICE_CHANNEL_ID = state.get("voice_channel_id", 0)
-    saved_roles = {int(k): v for k, v in state.get("saved_roles", {}).items()}
-
-    # 3. سجل النيوكات
-    strikes = _read_json(config.ANTINUKE_FILE, {})
-    NUKE_STRIKES = defaultdict(lambda: defaultdict(int))
-    for gid, users in strikes.items():
-        for uid, count in users.items():
-            NUKE_STRIKES[int(gid)][int(uid)] = count
-
-    log.info(
-        "تم تحميل الحالة | تحذيرات=%d | محميون=%d | رتب-محمية=%d | نواب=%d | بوتات-موثوقة=%d",
-        len(USER_WARNINGS), len(protected_users_list),
-        len(protected_roles_list), len(deputy_user_ids), len(trusted_bots)
-    )
-
-
-async def save_warnings() -> None:
-    """حفظ سجل التحذيرات"""
-    await async_save_json(
-        config.WARNINGS_FILE,
-        {str(k): v for k, v in USER_WARNINGS.items()}
-    )
-
-
-async def save_state() -> None:
-    """حفظ الحالة العامة (محميين، نواب، إلخ)"""
-    data = {
-        "protected_users": protected_users_list,
-        "protected_roles": protected_roles_list,
-        "deputies": deputy_user_ids,
-        "trusted_bots": trusted_bots,
-        "voice_channel_id": VOICE_CHANNEL_ID,
-        "saved_roles": {str(k): v for k, v in saved_roles.items()},
-    }
-    await async_save_json(config.STATE_FILE, data)
-
-
-async def save_nuke_strikes() -> None:
-    """حفظ سجل النيوكات"""
-    data = {str(gid): {str(uid): c for uid, c in users.items()}
-            for gid, users in NUKE_STRIKES.items()}
-    await async_save_json(config.ANTINUKE_FILE, data)
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -3226,16 +3334,28 @@ def load_extras_module():
         log.exception("خطأ في تحميل extras.py: %s", e)
 
 
-def main():
-    load_all_state()
-    keep_alive()
+async def _startup_async():
+    """دالة التشغيل Async (تهيئة MongoDB + تحميل الحالة)"""
+
+    # 1. اتصل بـ MongoDB (لو مفعل)
+    await init_mongodb()
+
+    # 2. حمّل الحالة (من MongoDB أو JSON)
+    await load_all_state_async()
+
+    # 3. حمّل extras
     load_extras_module()
+
+
+def main():
+    keep_alive()
+
+    # شغّل الـ startup كـ async
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    loop.run_until_complete(_startup_async())
 
     token = os.getenv("DISCORD_TOKEN")
     if not token:
         raise SystemExit("متغير DISCORD_TOKEN غير موجود!")
     bot.run(token, log_handler=None)
-
-
-if __name__ == "__main__":
-    main()
