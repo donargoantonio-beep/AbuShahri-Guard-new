@@ -1,5 +1,5 @@
 """
-extras.py -- الإضافات المتقدمة
+extras.py -- الإضافات المتقدمة (v6.4)
 تذكيرات / Welcome Card / إحصائيات / Anti-Phishing
 Auto-Mod / نسخ دورية / حجر مؤقت
 """
@@ -23,9 +23,6 @@ import config
 log = logging.getLogger("extras")
 
 
-# ============================================================
-# Shared -- يمتلئ من main.py
-# ============================================================
 SHARED: dict = {}
 
 
@@ -55,7 +52,6 @@ REMINDERS: list = []
 
 
 def parse_duration(text: str) -> Optional[int]:
-    """يحول نص مثل 10m / 2h / 1d / 30s إلى ثواني"""
     if not text:
         return None
     pattern = re.compile(r"(\d+)\s*(d|h|m|s|يوم|ساعة|دقيقة|ثانية)", re.IGNORECASE)
@@ -100,6 +96,9 @@ def save_reminders():
 
 
 async def reminder_loop(bot: commands.Bot):
+    await bot.wait_until_ready()
+    log.info("حلقة التذكيرات بدأت")
+
     while True:
         try:
             now = time.time()
@@ -148,26 +147,41 @@ def save_temp_actions():
 
 
 async def temp_actions_loop(bot: commands.Bot):
+    """يتحقق كل 30 ثانية من العقوبات المنتهية"""
+    await bot.wait_until_ready()
+    log.info("حلقة العقوبات المؤقتة بدأت")
+
     while True:
         try:
             now = time.time()
             due = [a for a in TEMP_ACTIONS if a["until"] <= now]
+
+            if due:
+                log.info("عقوبات منتهية: %d", len(due))
+
             for action in due:
                 try:
                     guild = bot.get_guild(action["guild_id"])
                     if not guild:
-                        TEMP_ACTIONS.remove(action)
+                        log.warning("السيرفر غير موجود: %s", action["guild_id"])
+                        if action in TEMP_ACTIONS:
+                            TEMP_ACTIONS.remove(action)
                         continue
 
                     user_id = action["user_id"]
                     kind = action["type"]
+                    member = guild.get_member(user_id)
 
                     if kind == "jail":
-                        member = guild.get_member(user_id)
-                        if member:
+                        if member is None:
+                            log.warning("العضو %s ليس في السيرفر -- تخطي", user_id)
+                        else:
                             remove_jail = SHARED.get("remove_jail")
                             if remove_jail:
-                                await remove_jail(guild, member)
+                                ok, msg = await remove_jail(guild, member)
+                                log.info("فك حجر %s: %s", member, msg)
+                            else:
+                                log.error("remove_jail غير موجود في SHARED!")
 
                     try:
                         get_ch = SHARED.get("get_ch_admin_review")
@@ -181,21 +195,32 @@ async def temp_actions_loop(bot: commands.Bot):
                                 )
                                 embed.add_field(
                                     name="العضو",
-                                    value="<@" + str(user_id) + "> (`" + str(user_id) + "`)",
+                                    value="<@" + str(user_id) + "> (" + str(user_id) + ")",
                                     inline=False,
                                 )
+                                if action.get("reason"):
+                                    embed.add_field(
+                                        name="السبب الأصلي",
+                                        value=action["reason"],
+                                        inline=False,
+                                    )
                                 await ch.send(embed=embed)
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        log.warning("فشل إرسال إشعار: %s", e)
 
                 except Exception as e:
-                    log.warning("فشل إنهاء عقوبة مؤقتة: %s", e)
+                    log.exception("فشل إنهاء عقوبة: %s", e)
+
                 if action in TEMP_ACTIONS:
                     TEMP_ACTIONS.remove(action)
+
             if due:
                 save_temp_actions()
+                log.info("تم إنهاء %d عقوبة مؤقتة", len(due))
+
         except Exception as e:
             log.exception("خطأ في temp_actions_loop: %s", e)
+
         await asyncio.sleep(30)
 
 
@@ -467,6 +492,9 @@ async def update_guild_stats(guild: discord.Guild):
 # ============================================================
 
 async def periodic_backup_loop(bot: commands.Bot):
+    await bot.wait_until_ready()
+    log.info("حلقة النسخ الدورية بدأت (كل %d ساعة)", config.PERIODIC_BACKUP_HOURS)
+
     while True:
         try:
             await asyncio.sleep(config.PERIODIC_BACKUP_HOURS * 3600)
@@ -491,14 +519,14 @@ async def periodic_backup_loop(bot: commands.Bot):
                     log.warning("فشل النسخ الاحتياطي لـ %s: %s", guild.name, e)
         except Exception as e:
             log.exception("خطأ في periodic_backup_loop: %s", e)
-          # ============================================================
+
+
+# ============================================================
 # الأوامر
 # ============================================================
 
 def setup_commands(bot: commands.Bot):
-    """يسجل كل أوامر extras"""
 
-    # ---------- تذكير ----------
     @bot.tree.command(name="تذكير", description="ضع تذكيرا بعد مدة محددة")
     @app_commands.describe(
         duration="المدة (مثل: 10m / 2h / 1d / 1h30m)",
@@ -545,7 +573,6 @@ def setup_commands(bot: commands.Bot):
             ephemeral=True,
         )
 
-    # ---------- حجر موقت ----------
     @bot.tree.command(name="حجر_موقت", description="حجر مؤقت مع فك تلقائي")
     @app_commands.describe(
         member="العضو",
@@ -637,7 +664,6 @@ def setup_commands(bot: commands.Bot):
             ephemeral=True,
         )
 
-    # ---------- قائمة الحجر المؤقت ----------
     @bot.tree.command(name="قائمة_الحجر_الموقت",
                       description="عرض العقوبات المؤقتة النشطة")
     async def temp_list_cmd(interaction: discord.Interaction):
@@ -668,7 +694,6 @@ def setup_commands(bot: commands.Bot):
         )
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
-    # ---------- تحديث الإحصائيات ----------
     @bot.tree.command(name="تحديث_الاحصائيات",
                       description="تحديث روم الإحصائيات يدويا")
     async def update_stats_cmd(interaction: discord.Interaction):
@@ -684,7 +709,6 @@ def setup_commands(bot: commands.Bot):
             "تم تحديث الإحصائيات.", ephemeral=True
         )
 
-    # ---------- نسخة احتياطية يدوية ----------
     @bot.tree.command(name="نسخة_الان",
                       description="أخذ نسخة احتياطية الآن")
     async def backup_now_cmd(interaction: discord.Interaction):
@@ -715,7 +739,6 @@ def setup_commands(bot: commands.Bot):
         except Exception as e:
             await interaction.followup.send("فشل: " + str(e), ephemeral=True)
 
-    # ---------- اختبار Auto-Mod ----------
     @bot.tree.command(name="اختبار_اوتو_مود",
                       description="اختبار فحص Auto-Mod على نص")
     @app_commands.describe(text="النص للفحص")
@@ -746,7 +769,6 @@ def setup_commands(bot: commands.Bot):
             )
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
-    # ---------- اختبار Anti-Phishing ----------
     @bot.tree.command(name="اختبار_التصيد",
                       description="فحص رابط للتصيد")
     @app_commands.describe(text="النص للفحص")
@@ -771,12 +793,10 @@ def setup_commands(bot: commands.Bot):
 
 
 # ============================================================
-# معالج الرسائل (Auto-Mod + Anti-Phishing)
+# معالج الرسائل
 # ============================================================
 
 def setup_message_handler(bot: commands.Bot):
-    """يسجل on_message جديد يعمل قبل الموجود في main.py"""
-
     old_handler = bot.on_message
 
     async def new_message_handler(message: discord.Message):
@@ -794,7 +814,7 @@ def setup_message_handler(bot: commands.Bot):
         guild = message.guild
         member = message.author
 
-        # --------- ك- Anti-Phishing ----------
+        # Anti-Phishing
         if config.ANTI_PHISHING_ENABLED:
             phishing_url = detect_phishing(message.content or "")
             if phishing_url:
@@ -817,7 +837,7 @@ def setup_message_handler(bot: commands.Bot):
 
                 if log_ch:
                     embed = discord.Embed(
-                        title="Anti-Phishing: تمشف رابط تصيد",
+                        title="Anti-Phishing: تم كشف رابط تصيد",
                         color=discord.Color.dark_red(),
                         timestamp=discord.utils.utcnow(),
                     )
@@ -825,26 +845,17 @@ def setup_message_handler(bot: commands.Bot):
                         name=str(member),
                         icon_url=member.display_avatar.url,
                     )
-                    embed.add_field(
-                        name="العضو",
-                        value=str(member) + " (" + str(member.id) + ")",
-                        inline=False,
-                    )
-                    embed.add_field(
-                        name="الرابط المشبوه",
-                        value=phishing_url,
-                        inline=False,
-                    )
-                    embed.add_field(
-                        name="الرسالة",
-                        value=(message.content or "")[:500],
-                        inline=False,
-                    )
-                    embed.add_field(
-                        name="العقوبة",
-                        value=punishment_msg or "حجر",
-                        inline=False,
-                    )
+                    embed.add_field(name="العضو",
+                                    value=str(member) + " (" + str(member.id) + ")",
+                                    inline=False)
+                    embed.add_field(name="الرابط المشبوه",
+                                    value=phishing_url, inline=False)
+                    embed.add_field(name="الرسالة",
+                                    value=(message.content or "")[:500],
+                                    inline=False)
+                    embed.add_field(name="العقوبة",
+                                    value=punishment_msg or "حجر",
+                                    inline=False)
                     try:
                         await log_ch.send(embed=embed)
                     except Exception:
@@ -853,7 +864,7 @@ def setup_message_handler(bot: commands.Bot):
                 log.warning("Phishing detected: %s -> %s", member, phishing_url)
                 return
 
-        # ---------- Auto-Mod ----------
+        # Auto-Mod
         if config.AUTOMOD_ENABLED:
             result = automod_check(message)
             if result:
@@ -928,37 +939,16 @@ def setup_message_handler(bot: commands.Bot):
                         name=str(member),
                         icon_url=member.display_avatar.url,
                     )
-                    embed.add_field(
-                        name="العضو",
-                        value=str(member) + " (" + str(member.id) + ")",
-                        inline=False,
-                    )
-                    embed.add_field(
-                        name="الروم",
-                        value=message.channel.mention,
-                        inline=True,
-                    )
-                    embed.add_field(
-                        name="النوع",
-                        value=reason,
-                        inline=True,
-                    )
-                    embed.add_field(
-                        name="التفاصيل",
-                        value=detail,
-                        inline=True,
-                    )
-                    embed.add_field(
-                        name="الإجراء",
-                        value=action_taken,
-                        inline=False,
-                    )
+                    embed.add_field(name="العضو",
+                                    value=str(member) + " (" + str(member.id) + ")",
+                                    inline=False)
+                    embed.add_field(name="الروم",
+                                    value=message.channel.mention, inline=True)
+                    embed.add_field(name="النوع", value=reason, inline=True)
+                    embed.add_field(name="التفاصيل", value=detail, inline=True)
+                    embed.add_field(name="الإجراء", value=action_taken, inline=False)
                     content = (message.content or "")[:500]
-                    embed.add_field(
-                        name="الرسالة",
-                        value=content,
-                        inline=False,
-                    )
+                    embed.add_field(name="الرسالة", value=content, inline=False)
                     try:
                         await log_ch.send(embed=embed)
                     except Exception:
@@ -975,12 +965,10 @@ def setup_message_handler(bot: commands.Bot):
 
 
 # ============================================================
-# load_extras -- الدالة الرئيسية
+# load_extras
 # ============================================================
 
 def load_extras(bot: commands.Bot, shared: dict):
-    """يحمل كل الإضافات"""
-
     SHARED.clear()
     SHARED.update(shared)
 
@@ -990,7 +978,7 @@ def load_extras(bot: commands.Bot, shared: dict):
     setup_commands(bot)
     setup_message_handler(bot)
 
-    # ---------- Welcome Card عبر on_member_join ----------
+    # Welcome Card
     async def welcome_card_handler(member: discord.Member):
         if not config.WELCOME_CARD_ENABLED:
             return
@@ -1027,24 +1015,33 @@ def load_extras(bot: commands.Bot, shared: dict):
 
     bot.add_listener(welcome_card_handler, "on_member_join")
 
-    # ---------- تشغيل المهام الدورية ----------
-    bot.loop.create_task(reminder_loop(bot))
-    bot.loop.create_task(temp_actions_loop(bot))
+    # بدء المهام عند on_ready
+    async def start_tasks_on_ready():
+        if getattr(bot, "_extras_started", False):
+            return
+        bot._extras_started = True
 
-    if config.PERIODIC_BACKUP_ENABLED:
-        bot.loop.create_task(periodic_backup_loop(bot))
+        log.info("بدء تشغيل مهام extras...")
 
-    # ---------- تحديث الإحصائيات ----------
-    async def stats_loop():
-        await bot.wait_until_ready()
-        while True:
-            try:
-                for guild in bot.guilds:
-                    await update_guild_stats(guild)
-            except Exception as e:
-                log.warning("خطأ في stats_loop: %s", e)
-            await asyncio.sleep(config.STATS_UPDATE_MINUTES * 60)
+        asyncio.create_task(reminder_loop(bot))
+        asyncio.create_task(temp_actions_loop(bot))
 
-    bot.loop.create_task(stats_loop())
+        if config.PERIODIC_BACKUP_ENABLED:
+            asyncio.create_task(periodic_backup_loop(bot))
+
+        async def stats_loop():
+            while True:
+                try:
+                    for guild in bot.guilds:
+                        await update_guild_stats(guild)
+                except Exception as e:
+                    log.warning("خطأ في stats_loop: %s", e)
+                await asyncio.sleep(config.STATS_UPDATE_MINUTES * 60)
+
+        asyncio.create_task(stats_loop())
+
+        log.info("تم بدء كل المهام بنجاح")
+
+    bot.add_listener(start_tasks_on_ready, "on_ready")
 
     log.info("تم تحميل extras.py -- كل الإضافات شغالة")
