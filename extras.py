@@ -640,6 +640,91 @@ async def periodic_backup_loop(bot: commands.Bot):
         except Exception as e:
             log.exception("خطأ في periodic_backup_loop: %s", e)
 
+# ═══════════════════════════════════════════════════════════════
+# 🔄 القسم 9.5: تجديد البانلات التلقائي
+# ═══════════════════════════════════════════════════════════════
+
+async def auto_refresh_panels_loop(bot: commands.Bot):
+    """
+    كل X دقيقة:
+    - يحذف البانلات القديمة (التذاكر + التقديم)
+    - يرسل بانلات جديدة
+    - يضمن أن الأزرار شغالة دائماً
+    """
+    await bot.wait_until_ready()
+    log.info("حلقة تجديد البانلات بدأت (كل %d دقيقة)",
+             config.PANEL_AUTO_REFRESH_MINUTES)
+
+    while True:
+        try:
+            await asyncio.sleep(config.PANEL_AUTO_REFRESH_MINUTES * 60)
+
+            get_ticket_panel = SHARED.get("get_ch_ticket_panel")
+            get_apply_panel = SHARED.get("get_ch_apply_panel")
+
+            for guild in bot.guilds:
+                # ---------- بانل التذاكر ----------
+                if get_ticket_panel:
+                    try:
+                        ch = get_ticket_panel(guild)
+                        if ch:
+                            # احذف القديم
+                            deleted = 0
+                            async for msg in ch.history(limit=50):
+                                if msg.author == bot.user and msg.embeds:
+                                    for emb in msg.embeds:
+                                        if emb.title and "مركز الدعم" in emb.title:
+                                            try:
+                                                await msg.delete()
+                                                deleted += 1
+                                            except Exception:
+                                                pass
+                                            break
+
+                            # أرسل الجديد
+                            from main import TicketButtonView
+                            embed = discord.Embed(
+                                title="مركز الدعم الفني",
+                                description="اضغط على الزر أدناه لفتح تذكرة خاصة للتواصل مع الإدارة.",
+                                color=discord.Color.green(),
+                            )
+                            await ch.send(embed=embed, view=TicketButtonView())
+                            log.info("تم تجديد بانل التذاكر في %s (حذف %d)",
+                                     guild.name, deleted)
+                    except Exception as e:
+                        log.warning("فشل تجديد بانل التذاكر: %s", e)
+
+                # ---------- بانل التقديم ----------
+                if get_apply_panel:
+                    try:
+                        ch = get_apply_panel(guild)
+                        if ch:
+                            deleted = 0
+                            async for msg in ch.history(limit=50):
+                                if msg.author == bot.user and msg.embeds:
+                                    for emb in msg.embeds:
+                                        if emb.title and "التقديم للسيرفر" in emb.title:
+                                            try:
+                                                await msg.delete()
+                                                deleted += 1
+                                            except Exception:
+                                                pass
+                                            break
+
+                            from main import ApplicationButtonView
+                            embed = discord.Embed(
+                                title="التقديم للسيرفر",
+                                description="اضغط على الزر أدناه لتعبئة استمارة التقديم.",
+                                color=discord.Color.purple(),
+                            )
+                            await ch.send(embed=embed, view=ApplicationButtonView())
+                            log.info("تم تجديد بانل التقديم في %s (حذف %d)",
+                                     guild.name, deleted)
+                    except Exception as e:
+                        log.warning("فشل تجديد بانل التقديم: %s", e)
+
+        except Exception as e:
+            log.exception("خطأ في auto_refresh_panels_loop: %s", e)
 
 # ═══════════════════════════════════════════════════════════════
 # ⚙️ القسم 10: الأوامر
@@ -1192,6 +1277,9 @@ def load_extras(bot: commands.Bot, shared: dict):
         asyncio.create_task(reminder_loop(bot))
         asyncio.create_task(temp_actions_loop(bot))
 
+        # ← تجديد البانلات
+        if config.PANEL_AUTO_REFRESH:
+            asyncio.create_task(auto_refresh_panels_loop(bot))
         if config.PERIODIC_BACKUP_ENABLED:
             asyncio.create_task(periodic_backup_loop(bot))
 
@@ -1211,3 +1299,10 @@ def load_extras(bot: commands.Bot, shared: dict):
     bot.add_listener(start_tasks_on_ready, "on_ready")
 
     log.info("تم تحميل extras.py -- كل الإضافات شغالة")
+
+# ═══════════════════════════════════════════════════════════════
+# 🔄 القسم 17: تجديد البانلات التلقائي
+# ═══════════════════════════════════════════════════════════════
+# البوت يحذف البانلات القديمة ويرسل جديدة كل X دقيقة
+PANEL_AUTO_REFRESH = True
+PANEL_AUTO_REFRESH_MINUTES = 60  # كل ساعة (تقدر تغيره)
