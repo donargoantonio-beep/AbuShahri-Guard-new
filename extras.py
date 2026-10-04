@@ -24,7 +24,6 @@ log = logging.getLogger("extras")
 # 🔧 القسم 2: الأدوات المشتركة (SHARED + JSON)
 # ═══════════════════════════════════════════════════════════════
 
-# SHARED: يمتلئ من main.py بالدوال والكائنات المشتركة
 SHARED: dict = {}
 
 
@@ -56,7 +55,7 @@ def _save_json(path, data):
 REMINDERS: list = []
 
 
-def parse_duration(text: str):
+def parse_duration(text: str) -> Optional[int]:
     """يحوّل نص مثل 10m / 2h / 1d / 30s إلى ثواني"""
     if not text:
         return None
@@ -96,13 +95,13 @@ def format_duration(seconds: int) -> str:
 
 
 def load_reminders():
-    """تحميل من JSON (احتياطي)"""
+    """تحميل التذكيرات من JSON (احتياطي)"""
     global REMINDERS
     REMINDERS = _load_json(config.REMINDERS_FILE, [])
 
 
 async def save_reminders():
-    """حفظ (MongoDB أو JSON)"""
+    """حفظ التذكيرات (MongoDB أو JSON)"""
     if config.MONGO_ENABLED:
         try:
             from main import mongo_save
@@ -178,13 +177,13 @@ TEMP_ACTIONS: list = []
 
 
 def load_temp_actions():
-    """تحميل من JSON (احتياطي)"""
+    """تحميل العقوبات المؤقتة من JSON (احتياطي)"""
     global TEMP_ACTIONS
     TEMP_ACTIONS = _load_json(config.TEMP_ACTIONS_FILE, [])
 
 
 async def save_temp_actions():
-    """حفظ (MongoDB أو JSON)"""
+    """حفظ العقوبات المؤقتة (MongoDB أو JSON)"""
     if config.MONGO_ENABLED:
         try:
             from main import mongo_save
@@ -282,11 +281,12 @@ async def temp_actions_loop(bot: commands.Bot):
             log.exception("خطأ في temp_actions_loop: %s", e)
 
         await asyncio.sleep(30)
- # ═══════════════════════════════════════════════════════════════
+
+
+# ═══════════════════════════════════════════════════════════════
 # 🎣 القسم 5: Anti-Phishing
 # ═══════════════════════════════════════════════════════════════
 
-# --- regex لاستخراج الروابط ---
 PHISHING_PATTERN = re.compile(
     r"(https?://)?([a-z0-9\-\.]+\.[a-z]{2,})(/[^\s]*)?",
     re.IGNORECASE,
@@ -294,12 +294,7 @@ PHISHING_PATTERN = re.compile(
 
 
 def detect_phishing(content: str) -> Optional[str]:
-    """
-    يفحص النص ويعيد:
-    - اسم النطاق المشبوه إذا وجد
-    - "keyword: X + رابط" إذا كانت كلمة مشبوهة مع رابط
-    - None إذا سليم
-    """
+    """يفحص النص ويعيد النطاق المشبوه أو None"""
     if not content:
         return None
 
@@ -310,7 +305,7 @@ def detect_phishing(content: str) -> Optional[str]:
         if domain in lower:
             return domain
 
-    # 2. فحص كلمات مفتاحية + رابط
+    # 2. كلمات مفتاحية + رابط
     has_url = bool(PHISHING_PATTERN.search(content))
     if has_url:
         for kw in config.PHISHING_KEYWORDS:
@@ -334,7 +329,6 @@ def detect_phishing(content: str) -> Optional[str]:
                 "steamcommunity.com",
                 "twitch.tv",
             ):
-                # تأكد أنه مو النطاق الرسمي
                 if not any(official in domain for official in [
                     "discord.com", "discord.gg", "discordapp.com",
                     "steampowered.com", "steamcommunity.com",
@@ -346,25 +340,23 @@ def detect_phishing(content: str) -> Optional[str]:
 
 
 # ═══════════════════════════════════════════════════════════════
-# 🛡️ القسم 6: Auto-Mod (كشف السبام)
+# 🛡️ القسم 6: Auto-Mod
 # ═══════════════════════════════════════════════════════════════
 
-# --- regex للإيموجي ---
 EMOJI_PATTERN = re.compile(
     "["
-    "\U0001F600-\U0001F64F"   # emoticons
-    "\U0001F300-\U0001F5FF"   # symbols & pictographs
-    "\U0001F680-\U0001F6FF"   # transport & map
-    "\U0001F1E0-\U0001F1FF"   # flags
-    "\U00002700-\U000027BF"   # dingbats
-    "\U0001F900-\U0001F9FF"   # supplemental
-    "\U00002600-\U000026FF"   # misc symbols
-    "\U0001FA70-\U0001FAFF"   # symbols extended
+    "\U0001F600-\U0001F64F"
+    "\U0001F300-\U0001F5FF"
+    "\U0001F680-\U0001F6FF"
+    "\U0001F1E0-\U0001F1FF"
+    "\U00002700-\U000027BF"
+    "\U0001F900-\U0001F9FF"
+    "\U00002600-\U000026FF"
+    "\U0001FA70-\U0001FAFF"
     "]+",
     flags=re.UNICODE,
 )
 
-# --- regex لـ Zalgo (رموز مشوهة) ---
 ZALGO_RE = re.compile(
     r"[\u0300-\u036f\u0489\u1ab0-\u1aff"
     r"\u1dc0-\u1dff\u20d0-\u20ff\ufe20-\ufe2f]"
@@ -372,11 +364,10 @@ ZALGO_RE = re.compile(
 
 
 def count_emojis(text: str) -> int:
-    """يعد الإيموجي في النص (بما فيها إيموجي السيرفر المخصص)"""
+    """يعد الإيموجي (بما فيها المخصص)"""
     count = 0
     for match in EMOJI_PATTERN.finditer(text):
         count += len(match.group(0))
-    # إيموجي مخصص <:name:id>
     count += len(re.findall(r"<a?:\w+:\d+>", text))
     return count
 
@@ -399,23 +390,18 @@ def symbol_percent(text: str) -> float:
 
 
 def count_zalgo(text: str) -> int:
-    """يعد الرموز المشوهة (Zalgo)"""
+    """يعد الرموز المشوهة"""
     return len(ZALGO_RE.findall(text))
 
 
 def automod_check(message) -> Optional[dict]:
-    """
-    يفحص الرسالة ويرجع:
-    - None إذا سليمة
-    - dict {reason, action, detail} إذا مخالفة
-    """
+    """يفحص الرسالة ويرجع مخالفة أو None"""
     if not config.AUTOMOD_ENABLED:
         return None
 
     s = config.AUTOMOD_SETTINGS
     content = message.content or ""
 
-    # 1. إيموجي
     if count_emojis(content) > s["max_emojis"]:
         return {
             "reason": "spam_emoji",
@@ -423,7 +409,6 @@ def automod_check(message) -> Optional[dict]:
             "detail": str(count_emojis(content)) + " إيموجي",
         }
 
-    # 2. حروف كبيرة
     if len(content) >= s["caps_min_length"] and caps_percent(content) > s["max_caps_percent"]:
         return {
             "reason": "spam_caps",
@@ -431,7 +416,6 @@ def automod_check(message) -> Optional[dict]:
             "detail": str(int(caps_percent(content) * 100)) + "% حروف كبيرة",
         }
 
-    # 3. منشنات
     if len(message.mentions) > s["max_mentions"]:
         return {
             "reason": "spam_mentions",
@@ -439,7 +423,6 @@ def automod_check(message) -> Optional[dict]:
             "detail": str(len(message.mentions)) + " منشن",
         }
 
-    # 4. Zalgo
     if count_zalgo(content) > s["max_zalgo"]:
         return {
             "reason": "zalgo",
@@ -447,7 +430,6 @@ def automod_check(message) -> Optional[dict]:
             "detail": str(count_zalgo(content)) + " رمز مشوه",
         }
 
-    # 5. رموز
     if len(content) >= 10 and symbol_percent(content) > s["max_symbols_percent"]:
         return {
             "reason": "spam_symbols",
@@ -459,7 +441,7 @@ def automod_check(message) -> Optional[dict]:
 
 
 # ═══════════════════════════════════════════════════════════════
-# 👋 القسم 7: Welcome Card (صورة الترحيب)
+# 👋 القسم 7: Welcome Card
 # ═══════════════════════════════════════════════════════════════
 
 def _wrap_text(text: str, max_chars: int = 20) -> str:
@@ -470,11 +452,7 @@ def _wrap_text(text: str, max_chars: int = 20) -> str:
 
 
 async def make_welcome_card(member: discord.Member) -> Optional[io.BytesIO]:
-    """
-    ينشئ صورة ترحيب بالأفاتار والاسم.
-    يرجع BytesIO أو None إذا فشل.
-    يحتاج مكتبة Pillow.
-    """
+    """ينشئ صورة ترحيب بالأفاتار والاسم"""
     try:
         from PIL import Image, ImageDraw, ImageFont
     except ImportError:
@@ -486,16 +464,13 @@ async def make_welcome_card(member: discord.Member) -> Optional[io.BytesIO]:
         bg_color = config.WELCOME_CARD_BG_COLOR
         accent = config.WELCOME_CARD_ACCENT
 
-        # --- الخلفية ---
         img = Image.new("RGB", (width, height), bg_color)
         draw = ImageDraw.Draw(img)
 
-        # --- دائرة الأفاتار ---
         circle_x = 150
         circle_y = height // 2
         circle_r = 100
 
-        # حلقة خارجية
         draw.ellipse(
             [
                 circle_x - circle_r - 5, circle_y - circle_r - 5,
@@ -504,7 +479,6 @@ async def make_welcome_card(member: discord.Member) -> Optional[io.BytesIO]:
             fill=accent,
         )
 
-        # --- تحميل الأفاتار ---
         avatar_bytes = await member.display_avatar.replace(
             size=256, format="png"
         ).read()
@@ -512,15 +486,12 @@ async def make_welcome_card(member: discord.Member) -> Optional[io.BytesIO]:
         avatar_img = Image.open(io.BytesIO(avatar_bytes)).convert("RGBA")
         avatar_img = avatar_img.resize((circle_r * 2, circle_r * 2), Image.LANCZOS)
 
-        # --- قناع دائري ---
         mask = Image.new("L", (circle_r * 2, circle_r * 2), 0)
         mask_draw = ImageDraw.Draw(mask)
         mask_draw.ellipse([0, 0, circle_r * 2, circle_r * 2], fill=255)
 
-        # --- لصق الأفاتار ---
         img.paste(avatar_img, (circle_x - circle_r, circle_y - circle_r), mask)
 
-        # --- تحميل خط ---
         font_big = None
         font_small = None
 
@@ -543,7 +514,6 @@ async def make_welcome_card(member: discord.Member) -> Optional[io.BytesIO]:
             font_big = ImageFont.load_default()
             font_small = font_big
 
-        # --- كتابة النصوص ---
         text_x = 320
         name_text = _wrap_text(member.name, 20)
 
@@ -566,13 +536,11 @@ async def make_welcome_card(member: discord.Member) -> Optional[io.BytesIO]:
             font=font_small,
         )
 
-        # --- خط أسفل ---
         draw.rectangle(
             [text_x, height // 2 + 90, width - 60, height // 2 + 93],
             fill=accent,
         )
 
-        # --- حفظ ---
         buf = io.BytesIO()
         img.save(buf, format="PNG")
         buf.seek(0)
@@ -587,15 +555,11 @@ async def make_welcome_card(member: discord.Member) -> Optional[io.BytesIO]:
 # 📊 القسم 8: إحصائيات السيرفر
 # ═══════════════════════════════════════════════════════════════
 
-# الحد الأدنى بين التحديثات (Discord rate limit)
 _last_stats_update = 0.0
 
 
 async def update_guild_stats(guild: discord.Guild):
-    """
-    يحدّث اسم روم الإحصائيات بآخر الأرقام.
-    يعمل مرة واحدة كل 60 ثانية (rate limit).
-    """
+    """يحدّث اسم روم الإحصائيات"""
     global _last_stats_update
 
     if not config.STATS_ENABLED:
@@ -606,7 +570,6 @@ async def update_guild_stats(guild: discord.Guild):
         return
     _last_stats_update = now
 
-    # --- إيجاد الروم ---
     ch = guild.get_channel(config.CH_STATS.get("id"))
     if not ch:
         for name in config.CH_STATS["names"]:
@@ -616,14 +579,12 @@ async def update_guild_stats(guild: discord.Guild):
     if not ch:
         return
 
-    # --- حساب الإحصائيات ---
     total = guild.member_count
     bots = sum(1 for m in guild.members if m.bot)
     humans = total - bots
     channels_count = len(guild.channels)
     roles_count = len(guild.roles)
 
-    # --- بناء الاسم الجديد ---
     new_name = (
         "Members: " + str(total) + " | "
         "Humans: " + str(humans) + " | "
@@ -632,7 +593,6 @@ async def update_guild_stats(guild: discord.Guild):
         "Roles: " + str(roles_count)
     )
 
-    # Discord max 100 حرف
     if len(new_name) > 100:
         new_name = "Members: " + str(total) + " | H: " + str(humans) + " | B: " + str(bots)
 
@@ -650,10 +610,7 @@ async def update_guild_stats(guild: discord.Guild):
 # ═══════════════════════════════════════════════════════════════
 
 async def periodic_backup_loop(bot: commands.Bot):
-    """
-    يأخذ نسخة احتياطية كاملة كل X ساعة (حسب config)
-    يشمل: cache الرومات والرتب + اسم/أيقونة/بانر السيرفر
-    """
+    """يأخذ نسخة احتياطية كل X ساعة"""
     await bot.wait_until_ready()
     log.info("حلقة النسخ الدورية بدأت (كل %d ساعة)", config.PERIODIC_BACKUP_HOURS)
 
@@ -682,6 +639,8 @@ async def periodic_backup_loop(bot: commands.Bot):
 
         except Exception as e:
             log.exception("خطأ في periodic_backup_loop: %s", e)
+
+
 # ═══════════════════════════════════════════════════════════════
 # ⚙️ القسم 10: الأوامر
 # ═══════════════════════════════════════════════════════════════
@@ -689,7 +648,6 @@ async def periodic_backup_loop(bot: commands.Bot):
 def setup_commands(bot: commands.Bot):
     """تسجيل كل أوامر extras"""
 
-    # --- أمر /تذكير ---
     @bot.tree.command(name="تذكير", description="ضع تذكيرا بعد مدة محددة")
     @app_commands.describe(
         duration="المدة (مثل: 10m / 2h / 1d / 1h30m)",
@@ -711,7 +669,6 @@ def setup_commands(bot: commands.Bot):
             )
             return
 
-        # Rate limiting
         check_rl = SHARED.get("check_rate_limit")
         if check_rl:
             ok, wait = check_rl(interaction.user.id, "تذكير")
@@ -721,7 +678,6 @@ def setup_commands(bot: commands.Bot):
                 )
                 return
 
-        # أضف التذكير
         due_time = time.time() + seconds
         reminder = {
             "user_id": interaction.user.id,
@@ -738,7 +694,6 @@ def setup_commands(bot: commands.Bot):
             ephemeral=True,
         )
 
-    # --- أمر /حجر_موقت ---
     @bot.tree.command(name="حجر_موقت", description="حجر مؤقت مع فك تلقائي")
     @app_commands.describe(
         member="العضو",
@@ -756,13 +711,13 @@ def setup_commands(bot: commands.Bot):
         seconds = parse_duration(duration)
         if not seconds:
             await interaction.response.send_message(
-                "صيغة غير صحيحة. أمثلة: 1h / 1d / 7d", ephemeral.",=True
+                "صيغة غير صحيحة. أمثلة: 1h / 1d / 7d", ephemeral=True
             )
-            return ephemer
+            return
 
-        ifal seconds > 30 * 86400:
-            await interaction=True.response.send_message(
-                "الحد 30 يوم
+        if seconds > 30 * 86400:
+            await interaction.response.send_message(
+                "الحد 30 يوم.", ephemeral=True
             )
             return
 
@@ -773,7 +728,6 @@ def setup_commands(bot: commands.Bot):
             )
             return
 
-        # طبّق الحجر
         ok, msg = await apply_jail(
             interaction.guild, member,
             "حجر مؤقت (" + format_duration(seconds) + ") بواسطة "
@@ -784,7 +738,6 @@ def setup_commands(bot: commands.Bot):
             await interaction.response.send_message(msg, ephemeral=True)
             return
 
-        # سجّل العقوبة المؤقتة
         TEMP_ACTIONS.append({
             "guild_id": interaction.guild.id,
             "user_id": member.id,
@@ -795,7 +748,6 @@ def setup_commands(bot: commands.Bot):
         })
         await save_temp_actions()
 
-        # إشعار العضو
         try:
             await member.send(
                 "حجر مؤقت من " + interaction.guild.name + "\n"
@@ -805,7 +757,6 @@ def setup_commands(bot: commands.Bot):
         except Exception:
             pass
 
-        # لوق
         get_ch = SHARED.get("get_ch_admin_review")
         if get_ch:
             ch = get_ch(interaction.guild)
@@ -841,7 +792,6 @@ def setup_commands(bot: commands.Bot):
             ephemeral=True,
         )
 
-    # --- أمر /قائمة_الحجر_الموقت ---
     @bot.tree.command(name="قائمة_الحجر_الموقت",
                       description="عرض العقوبات المؤقتة النشطة")
     async def temp_list_cmd(interaction: discord.Interaction):
@@ -874,7 +824,6 @@ def setup_commands(bot: commands.Bot):
         )
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
-    # --- أمر /تحديث_الاحصائيات ---
     @bot.tree.command(name="تحديث_الاحصائيات",
                       description="تحديث روم الإحصائيات يدويا")
     async def update_stats_cmd(interaction: discord.Interaction):
@@ -883,14 +832,13 @@ def setup_commands(bot: commands.Bot):
             return
 
         global _last_stats_update
-        _last_stats_update = 0  # تجاوز الـ cooldown
+        _last_stats_update = 0
 
         await update_guild_stats(interaction.guild)
         await interaction.response.send_message(
             "تم تحديث الإحصائيات.", ephemeral=True
         )
 
-    # --- أمر /نسخة_الان ---
     @bot.tree.command(name="نسخة_الان",
                       description="أخذ نسخة احتياطية الآن")
     async def backup_now_cmd(interaction: discord.Interaction):
@@ -921,7 +869,6 @@ def setup_commands(bot: commands.Bot):
         except Exception as e:
             await interaction.followup.send("فشل: " + str(e), ephemeral=True)
 
-    # --- أمر /اختبار_اوتو_مود ---
     @bot.tree.command(name="اختبار_اوتو_مود",
                       description="اختبار فحص Auto-Mod على نص")
     @app_commands.describe(text="النص للفحص")
@@ -930,7 +877,6 @@ def setup_commands(bot: commands.Bot):
         if check_control and not await check_control(interaction):
             return
 
-        # كائن وهمي للفحص
         class FakeMessage:
             def __init__(self, content):
                 self.content = content
@@ -953,7 +899,6 @@ def setup_commands(bot: commands.Bot):
             )
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
-    # --- أمر /اختبار_التصيد ---
     @bot.tree.command(name="اختبار_التصيد",
                       description="فحص رابط للتصيد")
     @app_commands.describe(text="النص للفحص")
@@ -982,22 +927,15 @@ def setup_commands(bot: commands.Bot):
 # ═══════════════════════════════════════════════════════════════
 
 def setup_message_handler(bot: commands.Bot):
-    """
-    يسجل معالج on_message جديد يعمل قبل الموجود في main.py.
-    يفحص:
-    1. Anti-Phishing -> حجر
-    2. Auto-Mod -> حسب الإعدادات
-    """
+    """يسجل معالج on_message جديد يعمل قبل الموجود في main.py"""
     old_handler = bot.on_message
 
     async def new_message_handler(message: discord.Message):
-        # تجاهل
         if message.author.bot or not message.guild:
             if old_handler:
                 await old_handler(message)
             return
 
-        # تجاهل المستثنين
         is_exempted = SHARED.get("is_exempted")
         if is_exempted and is_exempted(message.author):
             if old_handler:
@@ -1007,19 +945,15 @@ def setup_message_handler(bot: commands.Bot):
         guild = message.guild
         member = message.author
 
-        # ============================================================
-        # فحص Anti-Phishing
-        # ============================================================
+        # ---------- Anti-Phishing ----------
         if config.ANTI_PHISHING_ENABLED:
             phishing_url = detect_phishing(message.content or "")
             if phishing_url:
-                # احذف الرسالة
                 try:
                     await message.delete()
                 except Exception:
                     pass
 
-                # طبّق الحجر
                 get_ch = SHARED.get("get_ch_admin_review")
                 log_ch = get_ch(guild) if get_ch else None
 
@@ -1032,7 +966,6 @@ def setup_message_handler(bot: commands.Bot):
                     )
                     punishment_msg = msg
 
-                # لوق
                 if log_ch:
                     embed = discord.Embed(
                         title="Anti-Phishing: تم كشف رابط تصيد",
@@ -1071,13 +1004,10 @@ def setup_message_handler(bot: commands.Bot):
                 log.warning("Phishing detected: %s -> %s", member, phishing_url)
                 return
 
-        # ============================================================
-        # فحص Auto-Mod
-        # ============================================================
+        # ---------- Auto-Mod ----------
         if config.AUTOMOD_ENABLED:
             result = automod_check(message)
             if result:
-                # احذف الرسالة
                 try:
                     await message.delete()
                 except Exception:
@@ -1089,7 +1019,6 @@ def setup_message_handler(bot: commands.Bot):
 
                 action_taken = "حذف الرسالة"
 
-                # --- warn ---
                 if action == "warn":
                     USER_WARNINGS = SHARED.get("USER_WARNINGS")
                     save_warnings = SHARED.get("save_warnings")
@@ -1106,7 +1035,6 @@ def setup_message_handler(bot: commands.Bot):
                         warn_count = len(USER_WARNINGS[member.id])
                         action_taken = "تحذير رقم " + str(warn_count)
 
-                        # 3 تحذيرات = حجر دائم
                         if warn_count >= 3:
                             apply_jail = SHARED.get("apply_jail")
                             if apply_jail:
@@ -1116,7 +1044,6 @@ def setup_message_handler(bot: commands.Bot):
                                 )
                                 action_taken += "\n" + msg + " (حجر دائم)"
 
-                    # إشعار العضو
                     try:
                         await member.send(
                             "تنبيه Auto-Mod من " + guild.name + "\n"
@@ -1126,7 +1053,6 @@ def setup_message_handler(bot: commands.Bot):
                     except Exception:
                         pass
 
-                # --- timeout ---
                 elif action == "timeout":
                     try:
                         until = discord.utils.utcnow() + datetime.timedelta(minutes=10)
@@ -1138,11 +1064,9 @@ def setup_message_handler(bot: commands.Bot):
                     except Exception as e:
                         action_taken = "فشل التايم آوت: " + str(e)
 
-                # --- delete_only ---
                 elif action == "delete_only":
                     action_taken = "حذف الرسالة فقط"
 
-                # لوق
                 get_ch = SHARED.get("get_ch_admin_review")
                 log_ch = get_ch(guild) if get_ch else None
                 if log_ch:
@@ -1194,7 +1118,6 @@ def setup_message_handler(bot: commands.Bot):
                 log.info("Auto-Mod: %s -> %s (%s)", member, reason, action_taken)
                 return
 
-        # اترك main.py يكمل
         if old_handler:
             await old_handler(message)
 
@@ -1207,27 +1130,14 @@ def setup_message_handler(bot: commands.Bot):
 # ═══════════════════════════════════════════════════════════════
 
 def load_extras(bot: commands.Bot, shared: dict):
-    """
-    يُحمّل كل الإضافات:
-    - يربط SHARED
-    - يحمّل الملفات
-    - يسجل الأوامر
-    - يسجل معالج الرسائل
-    - يسجل welcome card
-    - يشغّل المهام الدورية عند on_ready
-    """
-    # اربط SHARED
+    """يُحمّل كل الإضافات"""
     SHARED.clear()
     SHARED.update(shared)
 
-    # حمّل الملفات
     load_reminders()
     load_temp_actions()
 
-    # سجل الأوامر
     setup_commands(bot)
-
-    # سجل معالج الرسائل
     setup_message_handler(bot)
 
     # ---------- Welcome Card ----------
@@ -1243,7 +1153,6 @@ def load_extras(bot: commands.Bot, shared: dict):
         if not ch:
             return
 
-        # جرّب ترسل الصورة
         card = await make_welcome_card(member)
         if card:
             try:
@@ -1255,7 +1164,6 @@ def load_extras(bot: commands.Bot, shared: dict):
             except Exception as e:
                 log.warning("فشل إرسال Welcome Card: %s", e)
 
-        # احتياطي: embed عادي
         embed = discord.Embed(
             title="عضو جديد!",
             description="مرحبا " + member.mention + " في " + member.guild.name,
@@ -1271,24 +1179,22 @@ def load_extras(bot: commands.Bot, shared: dict):
 
     # ---------- بدء المهام عند on_ready ----------
     async def start_tasks_on_ready():
-        # تجنب التشغيل المتكرر
         if getattr(bot, "_extras_started", False):
             return
         bot._extras_started = True
 
         log.info("بدء تشغيل مهام extras...")
 
-        # 1. التذكيرات
-        asyncio.create_task(reminder_loop(bot))
+        # اسحب البيانات من MongoDB قبل تشغيل الحلقات
+        await sync_reminders_from_mongo()
+        await sync_temp_actions_from_mongo()
 
-        # 2. العقوبات المؤقتة
+        asyncio.create_task(reminder_loop(bot))
         asyncio.create_task(temp_actions_loop(bot))
 
-        # 3. النسخ الدورية
         if config.PERIODIC_BACKUP_ENABLED:
             asyncio.create_task(periodic_backup_loop(bot))
 
-        # 4. الإحصائيات
         async def stats_loop():
             while True:
                 try:
