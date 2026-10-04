@@ -3,3 +3,5 @@ PyNaCl
 davey
 flask
 Pillow
+motor
+dnspython
