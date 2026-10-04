@@ -2903,6 +2903,8 @@ def load_extras_module():
             "get_ch_jail": get_ch_jail,
             "get_ch_welcome": get_ch_welcome,
             "get_ch_announce": get_ch_announce,
+            "get_ch_ticket_panel": get_ch_ticket_panel,
+            "get_ch_apply_panel": get_ch_apply_panel,
             "cache_full_guild": cache_full_guild,
             "backup_guild_name": backup_guild_name,
             "backup_guild_icon": backup_guild_icon,
