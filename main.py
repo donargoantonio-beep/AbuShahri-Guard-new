@@ -2023,7 +2023,8 @@ async def on_voice_state_update(member: discord.Member,
 # 🎫 القسم 17: الواجهات (Views)
 # ═══════════════════════════════════════════════════════════════
 
-class ApplicationModal(Modal, title="نموذج التقديم للإدارة"):
+# --- نموذج التقديم ---
+class ApplicationModal(Modal, title="نموذج التقديم للسيرفر"):
     q1 = TextInput(label="الاسم", placeholder="اكتب اسمك...", required=True, max_length=100)
     q2 = TextInput(label="العمر", placeholder="اكتب عمرك...", required=True, max_length=10)
     q3 = TextInput(label="سبب الانضمام", style=discord.TextStyle.paragraph,
@@ -2046,16 +2047,18 @@ class ApplicationModal(Modal, title="نموذج التقديم للإدارة"):
         await interaction.response.send_message("تم إرسال تقديمك للإدارة!", ephemeral=True)
 
 
+# --- زر فتح التقديم ---
 class ApplicationButtonView(View):
     def __init__(self):
         super().__init__(timeout=None)
 
-    @discord.ui.button(label="تقديم على الإدارة", style=discord.ButtonStyle.green,
+    @discord.ui.button(label="تقديم للسيرفر", style=discord.ButtonStyle.green,
                        custom_id="apply_button_permanent_v6")
     async def apply_button(self, interaction: discord.Interaction, button: Button):
         await interaction.response.send_modal(ApplicationModal())
 
 
+# --- أزرار القبول/الرفض ---
 class AdminDecisionView(View):
     def __init__(self, member: discord.Member):
         super().__init__(timeout=None)
@@ -2095,6 +2098,7 @@ class AdminDecisionView(View):
             "تم رفض طلب " + self.member.mention + ".", ephemeral=True)
 
 
+# --- زر إغلاق التذكرة ---
 class CloseTicketButton(View):
     def __init__(self):
         super().__init__(timeout=None)
@@ -2114,6 +2118,7 @@ class CloseTicketButton(View):
             pass
 
 
+# --- زر فتح التذكرة ---
 class TicketButtonView(View):
     def __init__(self):
         super().__init__(timeout=None)
@@ -2166,8 +2171,6 @@ class TicketButtonView(View):
 
         await ch.send(content=interaction.user.mention, embed=embed, view=CloseTicketButton())
         await interaction.response.send_message("تم فتح تذكرتك: " + ch.mention, ephemeral=True)
-
-
 # ═══════════════════════════════════════════════════════════════
 # ⚙️ القسم 18: الأوامر
 # ═══════════════════════════════════════════════════════════════
