@@ -29,7 +29,6 @@ except ImportError:
 # ⚙️ القسم 2: إعداد البوت والنوايا
 # ═══════════════════════════════════════════════════════════════
 
-# --- إعداد التسجيل (Logging) ---
 os.makedirs(config.LOGS_DIR, exist_ok=True)
 
 logging.basicConfig(
@@ -44,14 +43,12 @@ logging.basicConfig(
 log = logging.getLogger("bot")
 
 
-# --- إنشاء المجلدات المطلوبة ---
 for d in [config.DATA_DIR, config.BACKUPS_DIR,
           config.ICONS_DIR, config.BANNERS_DIR, config.LOGS_DIR,
           config.CARDS_DIR]:
     os.makedirs(d, exist_ok=True)
 
 
-# --- النوايا (Intents) ---
 intents = discord.Intents.default()
 intents.message_content = True
 intents.guilds = True
@@ -59,7 +56,6 @@ intents.members = True
 intents.voice_states = True
 
 
-# --- كائن البوت ---
 bot = commands.Bot(
     command_prefix="!nobotprefix!",
     intents=intents,
@@ -71,33 +67,18 @@ bot = commands.Bot(
 # 💾 القسم 3: الحالة العامة (State)
 # ═══════════════════════════════════════════════════════════════
 
-# --- الروم الصوتي الدائم ---
 VOICE_CHANNEL_ID: int = 0
-
-# --- سجل التحذيرات {user_id: [warnings]} ---
 USER_WARNINGS: dict = {}
-
-# --- الرتب المسحوبة من المحجورين {user_id: [role_ids]} ---
 saved_roles: dict = {}
-
-# --- قوائم الحماية ---
-protected_users_list: list = []   # آيديات الأشخاص المحميين
-protected_roles_list: list = []   # آيديات الرتب المحمية
-deputy_user_ids: list = []        # آيديات النواب
-trusted_bots: list = []           # آيديات البوتات الموثوقة
-
-# --- تتبع السبام {user_id: (last_text, last_time, count)} ---
+protected_users_list: list = []
+protected_roles_list: list = []
+deputy_user_ids: list = []
+trusted_bots: list = []
 SPAM_TRACKER: dict = {}
 SPAM_CLEANUP_LAST = 0.0
 
-# --- تتبع Anti-Nuke ---
-# {guild_id: {user_id: {action: deque[timestamps]}}}
 NUKE_TRACKER: dict = defaultdict(lambda: defaultdict(lambda: defaultdict(deque)))
-
-# {guild_id: {user_id: count}}
 NUKE_STRIKES: dict = defaultdict(lambda: defaultdict(int))
-
-# --- Rate Limiting {user_id: {command: deque[timestamps]}} ---
 RATE_LIMIT_TRACKER: dict = defaultdict(lambda: defaultdict(deque))
 
 
@@ -105,7 +86,7 @@ RATE_LIMIT_TRACKER: dict = defaultdict(lambda: defaultdict(deque))
 # 💿 القسم 4: حفظ وقراءة (JSON + MongoDB)
 # ═══════════════════════════════════════════════════════════════
 
-# ---------- (أ) أدوات JSON (تبقى للاستخدام المحلي) ----------
+# ---------- (أ) أدوات JSON ----------
 
 def _read_json(path: str, default):
     """قراءة ملف JSON بأمان"""
@@ -120,7 +101,7 @@ def _read_json(path: str, default):
 
 
 def _write_json(path: str, data) -> None:
-    """كتابة ملف JSON بأمان (atomic write)"""
+    """كتابة ملف JSON بأمان"""
     try:
         tmp = path + ".tmp"
         with open(tmp, "w", encoding="utf-8") as f:
@@ -131,19 +112,18 @@ def _write_json(path: str, data) -> None:
 
 
 async def async_save_json(path: str, data) -> None:
-    """حفظ ملف JSON في thread منفصل (لا يحجب البوت)"""
+    """حفظ ملف JSON في thread منفصل"""
     await asyncio.to_thread(_write_json, path, data)
 
 
 # ---------- (ب) MongoDB ----------
 
-# كائنات قاعدة البيانات (تُملأ عند التشغيل)
 _db = None
 _collections = {}
 
 
 async def init_mongodb() -> bool:
-    """الاتصال بـ MongoDB Atlas (يُستدعى من main)"""
+    """الاتصال بـ MongoDB Atlas"""
     global _db, _collections
 
     if not config.MONGO_ENABLED:
@@ -153,7 +133,10 @@ async def init_mongodb() -> bool:
     try:
         from motor.motor_asyncio import AsyncIOMotorClient
 
-        client = AsyncIOMotorClient(config.MONGO_URI, serverSelectionTimeoutMS=10000)
+        client = AsyncIOMotorClient(
+            config.MONGO_URI,
+            serverSelectionTimeoutMS=10000
+        )
         await client.admin.command("ping")
         _db = client[config.MONGO_DB_NAME]
 
@@ -166,10 +149,10 @@ async def init_mongodb() -> bool:
             "guild_cache": _db["guild_cache"],
             "backup_meta": _db["backup_meta"],
         }
-        log.info("تم الاتصال بـ MongoDB Atlas بنجاح")
+        log.info("✅ تم الاتصال بـ MongoDB Atlas بنجاح")
         return True
     except Exception as e:
-        log.error("فشل الاتصال بـ MongoDB: %s", e)
+        log.error("❌ فشل الاتصال بـ MongoDB: %s", e)
         config.MONGO_ENABLED = False
         return False
 
@@ -208,7 +191,7 @@ async def mongo_save(name: str, data):
 # ---------- (ج) دوال الحفظ الموحدة ----------
 
 async def save_warnings() -> None:
-    """حفظ سجل التحذيرات (MongoDB أو JSON)"""
+    """حفظ التحذيرات (MongoDB أو JSON)"""
     data = {str(k): v for k, v in USER_WARNINGS.items()}
     if config.MONGO_ENABLED:
         await mongo_save("warnings", {"data": data})
@@ -217,7 +200,7 @@ async def save_warnings() -> None:
 
 
 async def save_state() -> None:
-    """حفظ الحالة العامة (MongoDB أو JSON)"""
+    """حفظ الحالة العامة"""
     data = {
         "protected_users": protected_users_list,
         "protected_roles": protected_roles_list,
@@ -233,7 +216,7 @@ async def save_state() -> None:
 
 
 async def save_nuke_strikes() -> None:
-    """حفظ سجل النيوكات (MongoDB أو JSON)"""
+    """حفظ سجل النيوكات"""
     data = {str(gid): {str(uid): c for uid, c in users.items()}
             for gid, users in NUKE_STRIKES.items()}
     if config.MONGO_ENABLED:
@@ -251,7 +234,6 @@ async def load_all_state_async() -> None:
     global trusted_bots, NUKE_STRIKES
 
     if config.MONGO_ENABLED:
-        # ---------- MongoDB ----------
         log.info("تحميل الحالة من MongoDB...")
 
         # 1. التحذيرات
@@ -274,9 +256,8 @@ async def load_all_state_async() -> None:
             for uid, count in users.items():
                 NUKE_STRIKES[int(gid)][int(uid)] = count
 
-        log.info("تم تحميل الحالة من MongoDB")
+        log.info("✅ تم تحميل الحالة من MongoDB")
     else:
-        # ---------- JSON (احتياطي) ----------
         log.info("تحميل الحالة من ملفات JSON...")
 
         raw = _read_json(config.WARNINGS_FILE, {})
@@ -301,25 +282,24 @@ async def load_all_state_async() -> None:
         len(USER_WARNINGS), len(protected_users_list),
         len(protected_roles_list), len(deputy_user_ids), len(trusted_bots),
     )
-    # ═══════════════════════════════════════════════════════════════
+
+
+# ═══════════════════════════════════════════════════════════════
 # 🔍 القسم 5: البحث الذكي (رتب + رومات)
 # ═══════════════════════════════════════════════════════════════
 
 def find_role(guild: discord.Guild, cfg: dict) -> Optional[discord.Role]:
-    """يبحث عن رتبة بالآيدي أو بالاسم (تطابق تام أو جزئي)"""
-    # 1. بالآيدي
+    """يبحث عن رتبة بالآيدي أو بالاسم"""
     if cfg.get("id"):
         role = guild.get_role(cfg["id"])
         if role:
             return role
 
-    # 2. بالاسم الكامل
     for name in cfg["names"]:
         role = discord.utils.get(guild.roles, name=name)
         if role:
             return role
 
-    # 3. تطابق جزئي (case-insensitive)
     names_lower = [n.lower() for n in cfg["names"]]
     for role in guild.roles:
         if role.name.lower() in names_lower:
@@ -331,7 +311,6 @@ def find_role(guild: discord.Guild, cfg: dict) -> Optional[discord.Role]:
 def find_channel(guild: discord.Guild, cfg: dict,
                  channel_type: str = "text") -> Optional[discord.abc.GuildChannel]:
     """يبحث عن روم بالآيدي أو بالاسم"""
-    # 1. بالآيدي
     if cfg.get("id"):
         ch = guild.get_channel(cfg["id"])
         if ch:
@@ -342,7 +321,6 @@ def find_channel(guild: discord.Guild, cfg: dict,
             if channel_type == "category" and isinstance(ch, discord.CategoryChannel):
                 return ch
 
-    # 2. اختر القنوات حسب النوع
     if channel_type == "text":
         channels = guild.text_channels
     elif channel_type == "voice":
@@ -352,19 +330,16 @@ def find_channel(guild: discord.Guild, cfg: dict,
     else:
         channels = guild.channels
 
-    # 3. تطابق تام
     for name in cfg["names"]:
         for ch in channels:
             if ch.name == name:
                 return ch
 
-    # 4. يبدأ بـ prefix
     for name in cfg["names"]:
         for ch in channels:
             if ch.name.startswith(name):
                 return ch
 
-    # 5. يحتوي على الاسم (case-insensitive)
     names_lower = [n.lower() for n in cfg["names"]]
     for ch in channels:
         ch_lower = ch.name.lower()
@@ -374,8 +349,6 @@ def find_channel(guild: discord.Guild, cfg: dict,
 
     return None
 
-
-# --- اختصارات جاهزة (تُستخدم بكثرة) ---
 
 def get_role_jail(g):
     return find_role(g, config.ROLE_JAIL)
@@ -432,49 +405,34 @@ def get_cat_ticket(g):
     return find_channel(g, config.CH_TICKET_CATEGORY, "category")
 
 
-
-
-
 # ═══════════════════════════════════════════════════════════════
-# 🧹 القسم 7: تطبيع النص والكلمات المحظورة
+# 🧹 القسم 6: تطبيع النص والكلمات المحظورة
 # ═══════════════════════════════════════════════════════════════
 
-# --- قوالب regex للتطبيع ---
-_TASHKEEL_RE = re.compile(r'[\u0617-\u061A\u064B-\u0652]')  # التشكيل العربي
-_NON_ALNUM_RE = re.compile(r'[^a-zA-Z\u0600-\u06FF]')        # كل ما ليس حرف
-_DUP_RE = re.compile(r'(.)\1+')                              # حروف مكررة
-
-# --- خريطة استبدال الحروف المشابهة (Leetspeak) ---
+_TASHKEEL_RE = re.compile(r'[\u0617-\u061A\u064B-\u0652]')
 _LEET_MAP = str.maketrans({
     '@': 'a', '$': 's', '0': 'o', '1': 'i', '3': 'e',
     '5': 's', '7': 'h', '!': 'i', '|': 'l',
 })
+_NON_ALNUM_RE = re.compile(r'[^a-zA-Z\u0600-\u06FF]')
+_DUP_RE = re.compile(r'(.)\1+')
 
 
 def normalize_text(text: str):
-    """
-    يُعيد 3 نسخ من النص:
-    - cleaned: حروف نظيفة فقط
-    - collapsed: حروف مكررة مدمجة
-    - text: النص المطبّع الكامل
-    """
     text = text.lower()
-    text = _TASHKEEL_RE.sub('', text)          # إزالة التشكيل
-    text = text.translate(_LEET_MAP)           # استبدال leetspeak
-    cleaned = _NON_ALNUM_RE.sub('', text)      # إزالة الرموز
-    collapsed = _DUP_RE.sub(r'\1', cleaned)    # دمج المكرر
+    text = _TASHKEEL_RE.sub('', text)
+    text = text.translate(_LEET_MAP)
+    cleaned = _NON_ALNUM_RE.sub('', text)
+    collapsed = _DUP_RE.sub(r'\1', cleaned)
     return text, cleaned, collapsed
 
 
 def _build_bad_words_regex(words):
-    """يبني regex بكلمة حدود دقيقة لكل لغة"""
     parts = []
     for w in words:
         if re.search(r'[\u0600-\u06FF]', w):
-            # حدود عربية
             parts.append(r'(?<![\u0600-\u06FF])' + re.escape(w) + r'(?![\u0600-\u06FF])')
         else:
-            # حدود إنجليزية
             parts.append(r'(?<![a-zA-Z])' + re.escape(w) + r'(?![a-zA-Z])')
     return re.compile("|".join(parts), re.IGNORECASE)
 
@@ -488,40 +446,31 @@ URL_REGEX = re.compile(
 
 
 # ═══════════════════════════════════════════════════════════════
-# 👑 القسم 8: المالك والنواب والصلاحيات
+# 👑 القسم 7: المالك والنواب والصلاحيات
 # ═══════════════════════════════════════════════════════════════
 
 def is_owner(user_id: int) -> bool:
-    """هل هذا مالك البوت؟"""
     return user_id == config.BOT_OWNER_ID
 
 
 def is_deputy(user_id: int) -> bool:
-    """هل هذا نائب؟"""
     return user_id in deputy_user_ids
 
 
 def has_control(user_id: int) -> bool:
-    """هل يملك صلاحيات تحكم (مالك أو نائب)؟"""
     return is_owner(user_id) or is_deputy(user_id)
 
 
 def is_exempted(member) -> bool:
-    """
-    هل هذا العضو مستثنى من كل الحمايات؟
-    يشمل: المالك، النواب، مالك السيرفر، المحميين، الرتب المحمية، البوتات الموثوقة
-    يعمل مع Member و User
-    """
+    """هل العضو مستثنى من الحمايات؟"""
     if member is None:
         return False
 
     user_id = member.id
 
-    # 1. المالك أو النائب
     if is_owner(user_id) or is_deputy(user_id):
         return True
 
-    # 2. مالك السيرفر أو رتب محمية
     if isinstance(member, discord.Member):
         if member.guild and user_id == member.guild.owner_id:
             return True
@@ -529,11 +478,9 @@ def is_exempted(member) -> bool:
         if any(r.id in protected_ids for r in member.roles):
             return True
 
-    # 3. محمي يدوياً
     if user_id in protected_users_list:
         return True
 
-    # 4. بوت موثوق
     if getattr(member, "bot", False) and user_id in trusted_bots:
         return True
 
@@ -541,7 +488,6 @@ def is_exempted(member) -> bool:
 
 
 async def require_control(interaction: discord.Interaction) -> bool:
-    """يتحقق أن المستخدم مالك أو نائب (للأوامر)"""
     if has_control(interaction.user.id):
         return True
     if interaction.guild and interaction.user.id == interaction.guild.owner_id:
@@ -554,7 +500,6 @@ async def require_control(interaction: discord.Interaction) -> bool:
 
 
 async def require_owner(interaction: discord.Interaction) -> bool:
-    """يتحقق أن المستخدم مالك البوت فقط"""
     if is_owner(interaction.user.id):
         return True
     if interaction.guild and interaction.user.id == interaction.guild.owner_id:
@@ -567,15 +512,11 @@ async def require_owner(interaction: discord.Interaction) -> bool:
 
 
 # ═══════════════════════════════════════════════════════════════
-# ⚖️ القسم 9: فحص ترتيب الرتب + Rate Limiting
+# ⚖️ القسم 8: فحص ترتيب الرتب + Rate Limiting
 # ═══════════════════════════════════════════════════════════════
 
 def can_act_on(actor: discord.Member, target: discord.Member,
                guild: discord.Guild):
-    """
-    يتحقق أن الفاعل يقدر يعاقب الهدف
-    يرجع (مسموح؟, سبب الفشل)
-    """
     me = guild.me
 
     if target.id == me.id:
@@ -587,7 +528,6 @@ def can_act_on(actor: discord.Member, target: discord.Member,
     if target.top_role >= me.top_role:
         return False, "رتبة " + target.mention + " أعلى أو تساوي رتبة البوت."
 
-    # فحص رتبة الفاعل مقابل الهدف
     if isinstance(actor, discord.Member) and actor.id != me.id:
         if not is_owner(actor.id) and not is_deputy(actor.id):
             if actor.guild and actor.id != actor.guild.owner_id:
@@ -598,7 +538,6 @@ def can_act_on(actor: discord.Member, target: discord.Member,
 
 
 def bot_can_manage(target, guild: discord.Guild):
-    """يتحقق أن البوت يقدر يعدل على الهدف (رتبة أو عضو)"""
     me = guild.me
 
     if isinstance(target, discord.Member):
@@ -617,10 +556,6 @@ def bot_can_manage(target, guild: discord.Guild):
 
 
 def check_rate_limit(user_id: int, command: str):
-    """
-    يفحص إذا المستخدم تجاوز الحد المسموح
-    يرجع (مسموح؟, ثواني الانتظار)
-    """
     if command not in config.RATE_LIMITS:
         return True, 0
 
@@ -631,7 +566,6 @@ def check_rate_limit(user_id: int, command: str):
     now = time.time()
     dq = RATE_LIMIT_TRACKER[user_id][command]
 
-    # احذف الإدخالات القديمة
     while dq and now - dq[0] > window:
         dq.popleft()
 
@@ -644,7 +578,6 @@ def check_rate_limit(user_id: int, command: str):
 
 
 def cleanup_spam_tracker():
-    """ينظف SPAM_TRACKER من الإدخالات القديمة (كل 5 دقائق)"""
     global SPAM_CLEANUP_LAST
     now = time.time()
     if now - SPAM_CLEANUP_LAST < 300:
@@ -655,12 +588,12 @@ def cleanup_spam_tracker():
         if SPAM_TRACKER[uid][1] < cutoff:
             del SPAM_TRACKER[uid]
             # ═══════════════════════════════════════════════════════════════
-# 🔒 القسم 10: الحجر (دائم + مؤقت)
+# 🔒 القسم 9: نظام الحجر (دائم + مؤقت)
 # ═══════════════════════════════════════════════════════════════
 
 async def get_or_create_jail_channel(guild: discord.Guild,
                                      jail_role: discord.Role):
-    """يرجع روم الحجر. لو ما لقاه، ينشئه كحل أخير"""
+    """يرجع روم الحجر. لو ما لقاه، ينشئه"""
     channel = get_ch_jail(guild)
 
     if channel is None:
@@ -672,8 +605,9 @@ async def get_or_create_jail_channel(guild: discord.Guild,
             guild.me: discord.PermissionOverwrite(view_channel=True, send_messages=True),
         }
         try:
-            channel = await guild.create_text_channel("quarantine-zone",
-                                                       overwrites=overwrites)
+            channel = await guild.create_text_channel(
+                "quarantine-zone", overwrites=overwrites
+            )
             log.warning("لم أجد روم الحجر -- أنشأت واحد جديد.")
         except discord.Forbidden:
             log.error("لا أملك صلاحية إنشاء روم الحجر")
@@ -695,18 +629,12 @@ async def get_or_create_jail_channel(guild: discord.Guild,
 
 async def apply_jail(guild: discord.Guild, member: discord.Member,
                      reason: str):
-    """
-    يطبّق الحجر الدائم:
-    - يسحب كل الرتب (ويحفظها)
-    - يُعطيه رتبة محجور
-    - يخرجه من الرومات الصوتية
-    """
+    """يطبّق الحجر الدائم"""
     if is_exempted(member):
         return False, "هذا العضو محمي، لا يمكن حجره."
     if not isinstance(member, discord.Member):
         return False, "العضو غير موجود في السيرفر."
 
-    # فحص ترتيب الرتب
     ok, why = bot_can_manage(member, guild)
     if not ok:
         return False, "لا أستطيع حجر " + member.mention + ": " + why
@@ -719,7 +647,6 @@ async def apply_jail(guild: discord.Guild, member: discord.Member,
         return False, "رتبة محجور أعلى من رتبة البوت. ارفع رتبة البوت فوقها."
 
     try:
-        # احفظ الرتب الحالية
         if jail_role not in member.roles:
             saved_roles[member.id] = [
                 r.id for r in member.roles
@@ -729,7 +656,6 @@ async def apply_jail(guild: discord.Guild, member: discord.Member,
         await get_or_create_jail_channel(guild, jail_role)
         await member.edit(roles=[jail_role], reason=reason)
 
-        # أخرجه من الروم الصوتي
         if member.voice:
             try:
                 await member.move_to(None)
@@ -746,11 +672,7 @@ async def apply_jail(guild: discord.Guild, member: discord.Member,
 
 
 async def remove_jail(guild: discord.Guild, member: discord.Member):
-    """
-    يفك الحجر:
-    - يمسح رتبة محجور
-    - يستعيد الرتب المحفوظة
-    """
+    """يفك الحجر"""
     jail_role = get_role_jail(guild)
     if jail_role and jail_role in member.roles:
         try:
@@ -758,7 +680,6 @@ async def remove_jail(guild: discord.Guild, member: discord.Member):
         except Exception as e:
             log.warning("فشل إزالة رتبة الحجر: %s", e)
 
-    # استعد الرتب المحفوظة
     if member.id in saved_roles:
         role_ids = saved_roles.pop(member.id)
         roles_to_restore = []
@@ -777,25 +698,20 @@ async def remove_jail(guild: discord.Guild, member: discord.Member):
 
 
 # ═══════════════════════════════════════════════════════════════
-# 🛡️ القسم 11: Anti-Nuke (الكشف + العقوبات)
+# 🛡️ القسم 10: Anti-Nuke (الكشف + العقوبات)
 # ═══════════════════════════════════════════════════════════════
 
 def _now() -> float:
-    """الوقت الحالي بالثواني"""
     return time.time()
 
 
 def _prune_deque(dq: deque, window: int):
-    """يحذف الإدخالات القديمة من الطابور"""
     cutoff = _now() - window
     while dq and dq[0] < cutoff:
         dq.popleft()
 
 
 def record_action(guild_id: int, user_id: int, action: str) -> int:
-    """
-    يسجّل عملية جديدة ويرجع عدد العمليات خلال الفترة المسموحة
-    """
     if action not in config.ANTI_NUKE_THRESHOLDS:
         return 0
 
@@ -809,7 +725,6 @@ def record_action(guild_id: int, user_id: int, action: str) -> int:
 
 
 def is_nuke(guild_id: int, user_id: int, action: str) -> bool:
-    """هل المستخدم تجاوز عتبة النيوك لهذا الحدث؟"""
     if action not in config.ANTI_NUKE_THRESHOLDS:
         return False
     limit = config.ANTI_NUKE_THRESHOLDS[action]
@@ -819,7 +734,6 @@ def is_nuke(guild_id: int, user_id: int, action: str) -> bool:
 
 
 def clear_user_tracker(guild_id: int, user_id: int, action=None):
-    """يمسح سجل عمليات المستخدم (بعد معاقبته)"""
     if guild_id not in NUKE_TRACKER:
         return
     if user_id not in NUKE_TRACKER[guild_id]:
@@ -834,13 +748,9 @@ async def get_audit_executor(guild: discord.Guild,
                              action: discord.AuditLogAction,
                              target_id: int,
                              limit: int = 5):
-    """
-    يحاول معرفة من نفّذ العملية من audit log
-    """
     try:
         async for entry in guild.audit_logs(limit=limit, action=action):
             if entry.target and entry.target.id == target_id:
-                # تحقق أن العملية حديثة (خلال 15 ثانية)
                 age = (discord.utils.utcnow() - entry.created_at).total_seconds()
                 if age < 15:
                     return entry.user
@@ -853,15 +763,10 @@ async def get_audit_executor(guild: discord.Guild,
 
 async def send_nuke_log(guild: discord.Guild, title: str,
                         color: discord.Color, fields: dict):
-    """يرسل تقرير نيوك لروم اللوق"""
     log_ch = get_ch_log_nuke(guild) or get_ch_admin_review(guild)
     if not log_ch:
         return
-    embed = discord.Embed(
-        title=title,
-        color=color,
-        timestamp=discord.utils.utcnow(),
-    )
+    embed = discord.Embed(title=title, color=color, timestamp=discord.utils.utcnow())
     for name, value in fields.items():
         embed.add_field(name=name, value=str(value)[:1024], inline=False)
     try:
@@ -872,19 +777,14 @@ async def send_nuke_log(guild: discord.Guild, title: str,
 
 async def punish_nuker(guild: discord.Guild, member: discord.Member,
                        action: str, count: int) -> str:
-    """
-    يطبّق العقوبة بناءً على نظام التحذير المتدرج:
-    - أول نيك: تحذير بالخاص
-    - ثاني نيك وأكثر: حجر دائم
-    """
+    """تحذير متدرج: أول مرة تحذير، ثاني مرة حجر"""
     if member is None:
-        return "لم أعرف من نفّذ العملية."
+        return "لم أعرف من نفذ العملية."
     if member.id == guild.owner_id:
         return "لا يمكن معاقبة مالك السيرفر."
     if is_exempted(member):
         return "العضو محمي -- لم تطبق العقوبة."
 
-    # زيادة عدّاد النيوكات
     NUKE_STRIKES[guild.id][member.id] += 1
     strikes = NUKE_STRIKES[guild.id][member.id]
     await save_nuke_strikes()
@@ -893,7 +793,6 @@ async def punish_nuker(guild: discord.Guild, member: discord.Member,
 
     if config.GRADUATED_NUKE_PUNISHMENT:
         if strikes == 1:
-            # أول مرة: تحذير
             try:
                 await member.send(
                     "تحذير أول -- Anti-Nuke\n"
@@ -905,13 +804,10 @@ async def punish_nuker(guild: discord.Guild, member: discord.Member,
             except Exception:
                 pass
             return "تحذير أول لـ " + member.mention + " (نيك #1)"
-
         else:
-            # ثاني مرة+: حجر دائم
             ok, msg = await apply_jail(guild, member, reason)
             return "حجر دائم لـ " + member.mention + " (نيك #" + str(strikes) + ") -- " + msg
 
-    # عقوبة بدون تدرج
     if config.ANTI_NUKE_PUNISHMENT == "jail":
         ok, msg = await apply_jail(guild, member, reason)
         return msg
@@ -923,12 +819,6 @@ async def handle_nuke_event(guild: discord.Guild,
                             member: Optional[discord.Member],
                             action: str, target_desc: str,
                             restore_func=None):
-    """
-    المعالج المركزي لأي حدث نيوك:
-    1. يسجّل العملية
-    2. يفحص العتبة
-    3. لو تجاوز: يستعيد + يعاقب
-    """
     if not config.ANTI_NUKE_ENABLED:
         return
     if member is None:
@@ -941,22 +831,18 @@ async def handle_nuke_event(guild: discord.Guild,
     count = record_action(guild.id, member.id, action)
 
     if not is_nuke(guild.id, member.id, action):
-        return  # لسا ما تجاوز الحد
+        return
 
-    # نيك مكتشف!
     log.warning("NUKE detected: %s -- %s x %d", member, action, count)
 
-    # استرجاع ما يمكن استرجاعه
     if restore_func:
         try:
             await restore_func()
         except Exception as e:
             log.exception("فشل الاسترجاع: %s", e)
 
-    # عقوبة
     punishment = await punish_nuker(guild, member, action, count)
 
-    # لوق
     await send_nuke_log(
         guild,
         title="Anti-Nuke: تم كشف نشاط تخريبي",
@@ -972,16 +858,14 @@ async def handle_nuke_event(guild: discord.Guild,
         },
     )
 
-    # امسح سجل عملياته
     clear_user_tracker(guild.id, member.id, action)
 
 
 # ═══════════════════════════════════════════════════════════════
-# 💾 القسم 12: النسخ الاحتياطية
+# 💾 القسم 11: النسخ الاحتياطية
 # ═══════════════════════════════════════════════════════════════
 
 def _backup_meta_load() -> dict:
-    """يقرأ ملف meta الخاص بالنسخ"""
     return _read_json(config.BACKUP_FILE, {
         "names": [],
         "icons": [],
@@ -990,19 +874,15 @@ def _backup_meta_load() -> dict:
 
 
 def _backup_meta_save(data: dict) -> None:
-    """يحفظ ملف meta"""
     _write_json(config.BACKUP_FILE, data)
 
 
 def _add_to_history(lst: list, value, max_len: int):
-    """يضيف قيمة لقائمة مع منع التكرار والحد الأقصى"""
     if value in lst:
         lst.remove(value)
     lst.insert(0, value)
     del lst[max_len:]
 
-
-# --- اسم السيرفر ---
 
 def backup_guild_name(guild: discord.Guild):
     """يحفظ اسم السيرفر"""
@@ -1019,7 +899,7 @@ async def restore_guild_name(guild: discord.Guild):
     if len(meta["names"]) < 2:
         return False, "لا يوجد اسم قديم محفوظ."
 
-    previous = meta["names"][1]  # [0] هو الحالي
+    previous = meta["names"][1]
 
     try:
         await guild.edit(name=previous, reason="Anti-Nuke: استرجاع الاسم")
@@ -1030,10 +910,8 @@ async def restore_guild_name(guild: discord.Guild):
         return False, "فشل الاسترجاع: " + str(e)
 
 
-# --- أيقونة السيرفر ---
-
 async def backup_guild_icon(guild: discord.Guild):
-    """يحفظ أيقونة السيرفر (الرابط + الملف محلياً)"""
+    """يحفظ أيقونة السيرفر"""
     if not config.BACKUP_ENABLED:
         return
     if not guild.icon:
@@ -1043,7 +921,6 @@ async def backup_guild_icon(guild: discord.Guild):
         filename = str(guild.id) + "_" + str(int(_now())) + ".png"
         filepath = os.path.join(config.ICONS_DIR, filename)
 
-        # تحميل الصورة
         async with bot.http._HTTPClient__session.get(guild.icon.url) as resp:
             if resp.status == 200:
                 data = await resp.read()
@@ -1057,7 +934,6 @@ async def backup_guild_icon(guild: discord.Guild):
             "timestamp": int(_now()),
         }, config.BACKUP_MAX_ICONS)
 
-        # احذف الملفات القديمة الزائدة
         if len(meta["icons"]) > config.BACKUP_MAX_ICONS:
             for old in meta["icons"][config.BACKUP_MAX_ICONS:]:
                 old_path = os.path.join(config.ICONS_DIR, old["file"])
@@ -1093,8 +969,6 @@ async def restore_guild_icon(guild: discord.Guild):
     except Exception as e:
         return False, "فشل الاسترجاع: " + str(e)
 
-
-# --- بانر السيرفر ---
 
 async def backup_guild_banner(guild: discord.Guild):
     """يحفظ بانر السيرفر"""
@@ -1155,7 +1029,7 @@ async def restore_guild_banner(guild: discord.Guild):
     except Exception as e:
         return False, "فشل الاسترجاع: " + str(e)
         # ═══════════════════════════════════════════════════════════════
-# 🗂️ القسم 13: Cache الرومات والرتب
+# 🗂️ القسم 12: Cache الرومات والرتب
 # ═══════════════════════════════════════════════════════════════
 
 GUILD_CACHE: dict = defaultdict(lambda: {"channels": {}, "roles": {}})
@@ -1174,7 +1048,7 @@ def load_guild_cache():
 
 
 async def save_guild_cache():
-    """حفظ cache السيرفرات في الملف"""
+    """حفظ cache السيرفرات"""
     data = {}
     for gid, d in GUILD_CACHE.items():
         data[str(gid)] = {
@@ -1192,7 +1066,6 @@ def snapshot_channel(channel: discord.abc.GuildChannel) -> dict:
         "category_id": channel.category_id,
     }
 
-    # Overwrites (الصلاحيات)
     overwrites = {}
     for target, ow in channel.overwrites.items():
         allow, deny = ow.pair()
@@ -1203,7 +1076,6 @@ def snapshot_channel(channel: discord.abc.GuildChannel) -> dict:
         }
     base["overwrites"] = overwrites
 
-    # تفاصيل حسب النوع
     if isinstance(channel, discord.TextChannel):
         base.update({
             "kind": "text",
@@ -1223,7 +1095,6 @@ def snapshot_channel(channel: discord.abc.GuildChannel) -> dict:
         base["kind"] = "stage"
     else:
         base["kind"] = "unknown"
-
     return base
 
 
@@ -1241,7 +1112,7 @@ def snapshot_role(role: discord.Role) -> dict:
 
 
 def rebuild_overwrites(guild: discord.Guild, overwrites_data: dict) -> dict:
-    """يعيد بناء Overwrites من البيانات المحفوظة"""
+    """يعيد بناء Overwrites من البيانات"""
     result = {}
     for tid_str, ow in overwrites_data.items():
         tid = int(tid_str)
@@ -1256,7 +1127,7 @@ def rebuild_overwrites(guild: discord.Guild, overwrites_data: dict) -> dict:
 
 
 async def cache_full_guild(guild: discord.Guild):
-    """يأخذ لقطة كاملة من السيرفر (رومات + رتب)"""
+    """يأخذ لقطة كاملة من السيرفر"""
     channels_data = {}
     for ch in guild.channels:
         channels_data[ch.id] = snapshot_channel(ch)
@@ -1315,7 +1186,6 @@ async def restore_channel_from_cache(guild: discord.Guild, ch_id: int):
         else:
             return None
 
-        # حدّث الـ cache بالآيدي الجديد
         cache["channels"][new_ch.id] = snapshot_channel(new_ch)
         if ch_id in cache["channels"]:
             del cache["channels"][ch_id]
@@ -1343,7 +1213,6 @@ async def restore_role_from_cache(guild: discord.Guild, role_id: int):
             unicode_emoji=data.get("unicode_emoji"),
             reason="Anti-Nuke: استرجاع رتبة",
         )
-        # حاول رفعها لموضعها الأصلي
         try:
             await new_role.edit(position=data.get("position", new_role.position))
         except Exception:
@@ -1360,16 +1229,14 @@ async def restore_role_from_cache(guild: discord.Guild, role_id: int):
 
 
 # ═══════════════════════════════════════════════════════════════
-# 🚨 القسم 14: أحداث Anti-Nuke (حذف/تعديل الرومات والرتب)
+# 🚨 القسم 13: أحداث Anti-Nuke
 # ═══════════════════════════════════════════════════════════════
 
-# --- حذف روم ---
 @bot.event
 async def on_guild_channel_delete(channel: discord.abc.GuildChannel):
     guild = channel.guild
     await asyncio.sleep(0.7)
 
-    # احفظ اللقطة في الـ cache
     cache = GUILD_CACHE.get(guild.id, {})
     cached_data = cache.get("channels", {}).get(channel.id, snapshot_channel(channel))
     GUILD_CACHE[guild.id]["channels"][channel.id] = cached_data
@@ -1379,12 +1246,12 @@ async def on_guild_channel_delete(channel: discord.abc.GuildChannel):
         guild, discord.AuditLogAction.channel_delete, channel.id
     )
 
-    # لو البوت أو المالك أو النائب أو محمي -> لا استرجاع، لا عقوبة
+    # لو المالك أو النائب أو محمي -> لا استرجاع، لا عقوبة
     if executor and (executor.id == bot.user.id or is_exempted(executor)):
         log.info("حذف روم بواسطة مستثنى (%s) -- تم التجاهل", executor)
         return
 
-    # فقط لو شخص غير مستثنى -> استرجع + عاقب
+    # فقط لو شخص غير مستثنى
     await restore_channel_from_cache(guild, channel.id)
 
     if executor:
@@ -1400,12 +1267,10 @@ async def on_guild_channel_delete(channel: discord.abc.GuildChannel):
         )
 
 
-# --- إنشاء روم ---
 @bot.event
 async def on_guild_channel_create(channel: discord.abc.GuildChannel):
     guild = channel.guild
 
-    # حدّث الـ cache
     GUILD_CACHE[guild.id]["channels"][channel.id] = snapshot_channel(channel)
     await save_guild_cache()
 
@@ -1418,7 +1283,6 @@ async def on_guild_channel_create(channel: discord.abc.GuildChannel):
         return
 
     if executor:
-        # حذف الروم المُنشأ
         async def delete_new_channel():
             try:
                 await channel.delete(reason="Anti-Nuke: حذف روم منشأ")
@@ -1432,17 +1296,14 @@ async def on_guild_channel_create(channel: discord.abc.GuildChannel):
         )
 
 
-# --- تعديل روم ---
 @bot.event
 async def on_guild_channel_update(before: discord.abc.GuildChannel,
                                   after: discord.abc.GuildChannel):
     guild = after.guild
 
-    # حدّث الـ cache
     GUILD_CACHE[guild.id]["channels"][after.id] = snapshot_channel(after)
     await save_guild_cache()
 
-    # لوق التغييرات
     changes = []
     if before.name != after.name:
         changes.append("الاسم: " + before.name + " -> " + after.name)
@@ -1481,7 +1342,6 @@ async def on_guild_channel_update(before: discord.abc.GuildChannel,
         await handle_nuke_event(guild, executor, "channel_update", after.name)
 
 
-# --- حذف رتبة ---
 @bot.event
 async def on_guild_role_delete(role: discord.Role):
     guild = role.guild
@@ -1489,7 +1349,6 @@ async def on_guild_role_delete(role: discord.Role):
     if role.is_default() or role.managed:
         return
 
-    # احفظ اللقطة
     GUILD_CACHE[guild.id]["roles"][role.id] = snapshot_role(role)
     await save_guild_cache()
 
@@ -1498,12 +1357,12 @@ async def on_guild_role_delete(role: discord.Role):
         guild, discord.AuditLogAction.role_delete, role.id
     )
 
-    # لو البوت أو المالك أو النائب أو محمي -> لا استرجاع، لا عقوبة
+    # لو المالك أو النائب أو محمي -> لا استرجاع، لا عقوبة
     if executor and (executor.id == bot.user.id or is_exempted(executor)):
         log.info("حذف رتبة بواسطة مستثنى (%s) -- تم التجاهل", executor)
         return
 
-    # فقط لو شخص غير مستثنى -> استرجع + لوق + عقوبة
+    # فقط لو شخص غير مستثنى
     await restore_role_from_cache(guild, role.id)
 
     log_ch = get_ch_log_roles(guild)
@@ -1525,7 +1384,6 @@ async def on_guild_role_delete(role: discord.Role):
         await handle_nuke_event(guild, executor, "role_delete", role.name)
 
 
-# --- إنشاء رتبة ---
 @bot.event
 async def on_guild_role_create(role: discord.Role):
     guild = role.guild
@@ -1558,7 +1416,6 @@ async def on_guild_role_create(role: discord.Role):
         )
 
 
-# --- تعديل رتبة ---
 @bot.event
 async def on_guild_role_update(before: discord.Role, after: discord.Role):
     guild = after.guild
@@ -1566,7 +1423,7 @@ async def on_guild_role_update(before: discord.Role, after: discord.Role):
     if after.is_default() or after.managed:
         return
 
-    # لو الرتبة محمية وتغيرت صلاحياتها -> استرجعها
+    # رتبة محمية + تغيرت الصلاحيات -> استرجعها
     if before.permissions != after.permissions:
         if after.id in protected_roles_list:
             try:
@@ -1626,7 +1483,6 @@ async def on_guild_role_update(before: discord.Role, after: discord.Role):
             except Exception:
                 pass
 
-    # حدّث الـ cache
     GUILD_CACHE[guild.id]["roles"][after.id] = snapshot_role(after)
     await save_guild_cache()
 
@@ -1642,15 +1498,11 @@ async def on_guild_role_update(before: discord.Role, after: discord.Role):
         await handle_nuke_event(guild, executor, "role_update", after.name)
 
 
-# --- حظر عضو ---
 @bot.event
 async def on_member_ban(guild: discord.Guild, user: discord.User):
     await asyncio.sleep(0.7)
-    executor = await get_audit_executor(
-        guild, discord.AuditLogAction.ban, user.id
-    )
+    executor = await get_audit_executor(guild, discord.AuditLogAction.ban, user.id)
 
-    # لوق الباند
     log_ch = get_ch_log_ban(guild)
     if log_ch:
         embed = discord.Embed(
@@ -1670,7 +1522,6 @@ async def on_member_ban(guild: discord.Guild, user: discord.User):
         return
 
     if executor:
-        # فك البان
         async def unban_user():
             try:
                 await guild.unban(user, reason="Anti-Nuke: إلغاء بان تخريبي")
@@ -1685,19 +1536,14 @@ async def on_member_ban(guild: discord.Guild, user: discord.User):
         )
 
 
-# --- خروج عضو (كيك) ---
 @bot.event
 async def on_member_remove(member: discord.Member):
     guild = member.guild
     await asyncio.sleep(1.0)
 
-    executor = await get_audit_executor(
-        guild, discord.AuditLogAction.kick, member.id
-    )
+    executor = await get_audit_executor(guild, discord.AuditLogAction.kick, member.id)
 
     if executor:
-        # هذا كيك وليس مغادرة عادية
-
         log_ch = get_ch_log_ban(guild)
         if log_ch:
             embed = discord.Embed(
@@ -1715,7 +1561,6 @@ async def on_member_remove(member: discord.Member):
         if executor.id == bot.user.id or is_exempted(executor):
             return
 
-        # حاول تنبيه العضو
         async def notify_kicked():
             try:
                 await member.send(
@@ -1732,7 +1577,6 @@ async def on_member_remove(member: discord.Member):
         )
         return
 
-    # مغادرة عادية
     log_ch = get_ch_log_join_leave(guild)
     if log_ch:
         embed = discord.Embed(
@@ -1748,12 +1592,10 @@ async def on_member_remove(member: discord.Member):
             pass
 
 
-# --- إضافة بوت / إنشاء webhook ---
 @bot.event
 async def on_audit_log_entry_create(entry: discord.AuditLogEntry):
     guild = entry.guild
 
-    # كشف إضافة بوت
     if entry.action == discord.AuditLogAction.bot_add:
         target = entry.target
         if not isinstance(target, discord.Member):
@@ -1775,7 +1617,6 @@ async def on_audit_log_entry_create(entry: discord.AuditLogEntry):
             except Exception:
                 pass
 
-        # لو البوت غير موثوق -> اطرده + عاقب
         if target.id not in trusted_bots:
             try:
                 await target.kick(reason="Anti-Nuke: بوت غير موثوق")
@@ -1787,7 +1628,6 @@ async def on_audit_log_entry_create(entry: discord.AuditLogEntry):
                 str(target) + " (" + str(target.id) + ")",
             )
 
-    # كشف إنشاء Webhook
     elif entry.action == discord.AuditLogAction.webhook_create:
         if is_exempted(entry.user):
             return
@@ -1806,7 +1646,6 @@ async def on_audit_log_entry_create(entry: discord.AuditLogEntry):
             except Exception:
                 pass
 
-        # حذف الـ webhook
         async def del_webhook():
             try:
                 if hasattr(entry.target, "webhooks"):
@@ -1825,7 +1664,7 @@ async def on_audit_log_entry_create(entry: discord.AuditLogEntry):
 
 
 # ═══════════════════════════════════════════════════════════════
-# 🏰 القسم 15: حماية السيرفر (اسم / أيقونة / بانر)
+# 🏰 القسم 14: حماية السيرفر (اسم/أيقونة/بانر)
 # ═══════════════════════════════════════════════════════════════
 
 @bot.event
@@ -1916,15 +1755,13 @@ async def on_guild_update(before: discord.Guild, after: discord.Guild):
                     {"بواسطة": executor.mention},
                 )
                 # ═══════════════════════════════════════════════════════════════
-# 👋 القسم 16: الأحداث العامة (انضمام / مغادرة / تحديث)
+# 👋 القسم 15: الأحداث العامة (join/leave/update)
 # ═══════════════════════════════════════════════════════════════
 
 @bot.event
 async def on_member_join(member: discord.Member):
-    """عند انضمام عضو جديد"""
     guild = member.guild
 
-    # --- إرسال القوانين في الخاص ---
     try:
         invite_url = None
         try:
@@ -1941,11 +1778,8 @@ async def on_member_join(member: discord.Member):
         )
         view = View()
         if invite_url:
-            view.add_item(Button(
-                label="سيرفر " + guild.name,
-                url=invite_url,
-                style=discord.ButtonStyle.link,
-            ))
+            view.add_item(Button(label="سيرفر " + guild.name, url=invite_url,
+                                 style=discord.ButtonStyle.link))
             await member.send(embed=dm_embed, view=view)
         else:
             await member.send(embed=dm_embed)
@@ -1954,7 +1788,6 @@ async def on_member_join(member: discord.Member):
     except Exception as e:
         log.warning("فشل إرسال الترحيب: %s", e)
 
-    # --- رسالة في روم الترحيب ---
     welcome_ch = get_ch_welcome(guild)
     if welcome_ch:
         embed = discord.Embed(
@@ -1968,20 +1801,12 @@ async def on_member_join(member: discord.Member):
         except Exception:
             pass
 
-    # --- لوق الدخول ---
     log_ch = get_ch_log_join_leave(guild)
     if log_ch:
-        embed = discord.Embed(
-            title="عضو انضم",
-            color=discord.Color.green(),
-            timestamp=discord.utils.utcnow(),
-        )
+        embed = discord.Embed(title="عضو انضم", color=discord.Color.green(),
+                              timestamp=discord.utils.utcnow())
         embed.set_thumbnail(url=member.display_avatar.url)
-        embed.add_field(
-            name="العضو",
-            value=str(member) + " (" + str(member.id) + ")",
-            inline=False,
-        )
+        embed.add_field(name="العضو", value=str(member) + " (" + str(member.id) + ")", inline=False)
         embed.set_footer(text="عدد الأعضاء: " + str(guild.member_count))
         try:
             await log_ch.send(embed=embed)
@@ -1991,53 +1816,35 @@ async def on_member_join(member: discord.Member):
 
 @bot.event
 async def on_member_update(before: discord.Member, after: discord.Member):
-    """عند تحديث بيانات عضو (رتب أو لقب)"""
-
-    # --- تغيير الرتب ---
     if before.roles != after.roles:
         log_ch = get_ch_log_roles(after.guild)
         if log_ch:
             added = [r for r in after.roles if r not in before.roles]
             removed = [r for r in before.roles if r not in after.roles]
-
-            embed = discord.Embed(
-                title="تحديث رتب",
-                color=discord.Color.blue(),
-                timestamp=discord.utils.utcnow(),
-            )
+            embed = discord.Embed(title="تحديث رتب", color=discord.Color.blue(),
+                                  timestamp=discord.utils.utcnow())
             embed.add_field(name="العضو", value=after.mention, inline=False)
-
             if added:
-                embed.add_field(
-                    name="اضيفت",
-                    value=", ".join(r.mention for r in added)[:1024],
-                    inline=False,
-                )
+                embed.add_field(name="اضيفت",
+                                value=", ".join(r.mention for r in added)[:1024],
+                                inline=False)
             if removed:
-                embed.add_field(
-                    name="ازيلت",
-                    value=", ".join(r.mention for r in removed)[:1024],
-                    inline=False,
-                )
-
+                embed.add_field(name="ازيلت",
+                                value=", ".join(r.mention for r in removed)[:1024],
+                                inline=False)
             try:
                 await log_ch.send(embed=embed)
             except Exception:
                 pass
 
-    # --- تغيير اللقب ---
     if before.nick != after.nick:
         log_ch = get_ch_log_nickname(after.guild)
         if log_ch:
-            embed = discord.Embed(
-                title="تغير اللقب",
-                color=discord.Color.gold(),
-                timestamp=discord.utils.utcnow(),
-            )
+            embed = discord.Embed(title="تغير اللقب", color=discord.Color.gold(),
+                                  timestamp=discord.utils.utcnow())
             embed.add_field(name="العضو", value=after.mention, inline=False)
             embed.add_field(name="القديم", value=before.nick or "-", inline=True)
             embed.add_field(name="الجديد", value=after.nick or "-", inline=True)
-
             try:
                 await log_ch.send(embed=embed)
             except Exception:
@@ -2046,27 +1853,18 @@ async def on_member_update(before: discord.Member, after: discord.Member):
 
 @bot.event
 async def on_message_delete(message: discord.Message):
-    """عند حذف رسالة"""
     if message.author.bot or not message.guild:
         return
-
     log_ch = get_ch_log_delete(message.guild)
     if not log_ch:
         return
-
-    embed = discord.Embed(
-        title="حذف رسالة",
-        color=discord.Color.dark_red(),
-        timestamp=discord.utils.utcnow(),
-    )
+    embed = discord.Embed(title="حذف رسالة", color=discord.Color.dark_red(),
+                          timestamp=discord.utils.utcnow())
     embed.add_field(name="صاحب الرسالة", value=message.author.mention, inline=True)
     embed.add_field(name="الروم", value=message.channel.mention, inline=True)
-    embed.add_field(
-        name="المحتوى",
-        value=(message.content or "(وسائط)")[:1000],
-        inline=False,
-    )
-
+    embed.add_field(name="المحتوى",
+                    value=(message.content or "(وسائط)")[:1000],
+                    inline=False)
     try:
         await log_ch.send(embed=embed)
     except Exception:
@@ -2074,34 +1872,22 @@ async def on_message_delete(message: discord.Message):
 
 
 # ═══════════════════════════════════════════════════════════════
-# 💬 القسم 17: كشف المخالفات + on_message
+# 💬 القسم 16: كشف المخالفات + on_message
 # ═══════════════════════════════════════════════════════════════
 
 def detect_violation(message: discord.Message):
-    """
-    يفحص الرسالة ويرجع نوع المخالفة أو None
-    الأنواع:
-      - منشن الجميع
-      - السب/الشتم
-      - الروابط/الدعوات
-      - السبام
-    """
     raw = message.content or ""
 
-    # 1. منشن الجميع
     if message.mention_everyone:
         return "منشن الجميع (@everyone / @here)"
 
-    # 2. كلمات محظورة
     _, cleaned, collapsed = normalize_text(raw)
     if BAD_WORDS_RE.search(cleaned) or BAD_WORDS_RE.search(collapsed):
         return "السب والشتم / ألفاظ نابية"
 
-    # 3. روابط
     if URL_REGEX.search(raw):
         return "إرسال روابط أو دعوات سيرفرات"
 
-    # 4. السبام (رسائل مكررة)
     user_id = message.author.id
     now = time.time()
     entry = SPAM_TRACKER.get(user_id)
@@ -2123,17 +1909,13 @@ def detect_violation(message: discord.Message):
 
 @bot.event
 async def on_message(message: discord.Message):
-    """معالج الرسائل الرئيسي"""
-    # تجاهل: بوتات / رسائل خاصة
     if message.author.bot or not message.guild:
         return
 
-    # تجاهل: رسائل البادئة (prefix)
     if message.content.startswith(bot.command_prefix):
         await bot.process_commands(message)
         return
 
-    # تجاهل: المستثنى (مالك، نائب، محمي)
     if is_exempted(message.author):
         return
 
@@ -2145,13 +1927,11 @@ async def on_message(message: discord.Message):
     guild = message.guild
     member = message.author
 
-    # احذف الرسالة
     try:
         await message.delete()
     except Exception:
         pass
 
-    # سجّل التحذير
     now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
     USER_WARNINGS.setdefault(member.id, []).append({
         "reason": violation,
@@ -2162,40 +1942,25 @@ async def on_message(message: discord.Message):
 
     action_taken = ""
 
-    # ============================================================
-    # السب/الشتم = حجر دائم
-    # ============================================================
     if violation == "السب والشتم / ألفاظ نابية":
         ok, msg = await apply_jail(guild, member, "مخالفة: " + violation)
         action_taken = msg + " (حجر دائم)"
-
-    # ============================================================
-    # باقي المخالفات (روابط/سبام/منشن) = تحذير + تايم آوت ساعة
-    # ============================================================
     else:
         try:
             until = discord.utils.utcnow() + datetime.timedelta(hours=1)
-            await member.timeout(
-                until,
-                reason="تحذير " + str(warn_count) + ": " + violation,
-            )
+            await member.timeout(until, reason="تحذير " + str(warn_count) + ": " + violation)
             action_taken = "تحذير رقم " + str(warn_count) + " + تايم آوت ساعة."
         except discord.Forbidden:
             action_taken = "تحذير رقم " + str(warn_count) + " (فشل التايم آوت)."
         except Exception as e:
             action_taken = "تحذير رقم " + str(warn_count) + " (فشل: " + str(e) + ")"
 
-        # 3 تحذيرات = حجر دائم
         if warn_count >= 3:
-            ok, msg = await apply_jail(
-                guild, member,
-                "بلوغ " + str(warn_count) + " تحذيرات",
-            )
+            ok, msg = await apply_jail(guild, member, "بلوغ " + str(warn_count) + " تحذيرات")
             action_taken += "\n" + msg + " (حجر دائم)"
 
     await save_warnings()
 
-    # --- إشعار العضو بالخاص ---
     try:
         await member.send(
             "تنبيه إداري من سيرفر " + guild.name + "\n"
@@ -2206,49 +1971,28 @@ async def on_message(message: discord.Message):
     except Exception:
         pass
 
-    # --- تقرير في admin-review ---
     admin_ch = get_ch_admin_review(guild)
     if admin_ch:
-        embed = discord.Embed(
-            title="رصد مخالفة",
-            color=discord.Color.red(),
-            timestamp=discord.utils.utcnow(),
-        )
+        embed = discord.Embed(title="رصد مخالفة", color=discord.Color.red(),
+                              timestamp=discord.utils.utcnow())
         embed.set_author(name=member.name, icon_url=member.display_avatar.url)
-        embed.add_field(
-            name="العضو",
-            value=str(member) + " (" + str(member.id) + ")",
-            inline=False,
-        )
+        embed.add_field(name="العضو", value=str(member) + " (" + str(member.id) + ")", inline=False)
         embed.add_field(name="الروم", value=message.channel.mention, inline=True)
         embed.add_field(name="المخالفة", value=violation, inline=True)
         embed.add_field(name="التحذيرات", value=str(warn_count), inline=True)
         embed.add_field(name="الإجراء", value=action_taken, inline=False)
-
         content = (message.content or "")[:1000] or "(وسائط فقط)"
         embed.add_field(name="الرسالة", value=content, inline=False)
-
         try:
             await admin_ch.send(embed=embed)
         except Exception:
             pass
 
 
-# ═══════════════════════════════════════════════════════════════
-# 🎙️ القسم 18: أحداث الرومات الصوتية
-# ═══════════════════════════════════════════════════════════════
-
 @bot.event
 async def on_voice_state_update(member: discord.Member,
                                 before: discord.VoiceState,
                                 after: discord.VoiceState):
-    """
-    عند تغيير حالة العضو في الرومات الصوتية
-    - طرد المحجورين من الرومات
-    - إعادة اتصال البوت إذا خرج
-    """
-
-    # 1. طرد المحجورين من الرومات الصوتية
     jail_role = get_role_jail(member.guild)
     if jail_role and jail_role in member.roles and after.channel is not None:
         try:
@@ -2257,11 +2001,8 @@ async def on_voice_state_update(member: discord.Member,
             pass
         return
 
-    # 2. إعادة اتصال البوت بالروم الصوتي المحدد
     if VOICE_CHANNEL_ID == 0 or member.id != bot.user.id:
         return
-
-    # هل البوت كان في الروم المطلوب وخرج؟
     if before.channel and before.channel.id == VOICE_CHANNEL_ID:
         if after.channel is None or after.channel.id != VOICE_CHANNEL_ID:
             await asyncio.sleep(2)
@@ -2276,35 +2017,26 @@ async def on_voice_state_update(member: discord.Member,
                     await channel.connect()
                 except Exception as e:
                     log.warning("فشل إعادة الاتصال الصوتي: %s", e)
+
+
 # ═══════════════════════════════════════════════════════════════
-# 🎫 القسم 19: الواجهات (Views) — تذاكر + تقديم
+# 🎫 القسم 17: الواجهات (Views)
 # ═══════════════════════════════════════════════════════════════
 
-# --- نموذج التقديم ---
 class ApplicationModal(Modal, title="نموذج التقديم للإدارة"):
     q1 = TextInput(label="الاسم", placeholder="اكتب اسمك...", required=True, max_length=100)
     q2 = TextInput(label="العمر", placeholder="اكتب عمرك...", required=True, max_length=10)
-    q3 = TextInput(
-        label="سبب الانضمام",
-        style=discord.TextStyle.paragraph,
-        placeholder="اكتب السبب...",
-        required=True,
-        max_length=500,
-    )
+    q3 = TextInput(label="سبب الانضمام", style=discord.TextStyle.paragraph,
+                   placeholder="اكتب السبب...", required=True, max_length=500)
 
     async def on_submit(self, interaction: discord.Interaction):
         admin_ch = get_ch_admin_review(interaction.guild)
         if not admin_ch:
-            await interaction.response.send_message(
-                "لم أجد روم admin-review.", ephemeral=True
-            )
+            await interaction.response.send_message("لم أجد روم admin-review.", ephemeral=True)
             return
 
         embed = discord.Embed(title="طلب تقديم جديد", color=discord.Color.gold())
-        embed.set_author(
-            name=interaction.user.name,
-            icon_url=interaction.user.display_avatar.url,
-        )
+        embed.set_author(name=interaction.user.name, icon_url=interaction.user.display_avatar.url)
         embed.add_field(name="المتقدم", value=interaction.user.mention, inline=False)
         embed.add_field(name="الاسم", value=self.q1.value, inline=False)
         embed.add_field(name="العمر", value=self.q2.value, inline=False)
@@ -2314,21 +2046,16 @@ class ApplicationModal(Modal, title="نموذج التقديم للإدارة"):
         await interaction.response.send_message("تم إرسال تقديمك للإدارة!", ephemeral=True)
 
 
-# --- زر فتح التقديم ---
 class ApplicationButtonView(View):
     def __init__(self):
         super().__init__(timeout=None)
 
-    @discord.ui.button(
-        label="تقديم على الإدارة",
-        style=discord.ButtonStyle.green,
-        custom_id="apply_button_permanent_v6",
-    )
+    @discord.ui.button(label="تقديم على الإدارة", style=discord.ButtonStyle.green,
+                       custom_id="apply_button_permanent_v6")
     async def apply_button(self, interaction: discord.Interaction, button: Button):
         await interaction.response.send_modal(ApplicationModal())
 
 
-# --- أزرار القبول/الرفض ---
 class AdminDecisionView(View):
     def __init__(self, member: discord.Member):
         super().__init__(timeout=None)
@@ -2341,11 +2068,8 @@ class AdminDecisionView(View):
         await interaction.response.send_message("لا تمتلك الصلاحية.", ephemeral=True)
         return False
 
-    @discord.ui.button(
-        label="قبول",
-        style=discord.ButtonStyle.blurple,
-        custom_id="accept_app_btn_v6",
-    )
+    @discord.ui.button(label="قبول", style=discord.ButtonStyle.blurple,
+                       custom_id="accept_app_btn_v6")
     async def accept_app(self, interaction: discord.Interaction, button: Button):
         if not await self._check_perm(interaction):
             return
@@ -2355,14 +2079,10 @@ class AdminDecisionView(View):
             pass
         await interaction.message.edit(view=None)
         await interaction.response.send_message(
-            "تم قبول طلب " + self.member.mention + ".", ephemeral=True
-        )
+            "تم قبول طلب " + self.member.mention + ".", ephemeral=True)
 
-    @discord.ui.button(
-        label="رفض",
-        style=discord.ButtonStyle.red,
-        custom_id="reject_app_btn_v6",
-    )
+    @discord.ui.button(label="رفض", style=discord.ButtonStyle.red,
+                       custom_id="reject_app_btn_v6")
     async def reject_app(self, interaction: discord.Interaction, button: Button):
         if not await self._check_perm(interaction):
             return
@@ -2372,28 +2092,21 @@ class AdminDecisionView(View):
             pass
         await interaction.message.edit(view=None)
         await interaction.response.send_message(
-            "تم رفض طلب " + self.member.mention + ".", ephemeral=True
-        )
+            "تم رفض طلب " + self.member.mention + ".", ephemeral=True)
 
 
-# --- زر إغلاق التذكرة ---
 class CloseTicketButton(View):
     def __init__(self):
         super().__init__(timeout=None)
 
-    @discord.ui.button(
-        label="إغلاق التذكرة",
-        style=discord.ButtonStyle.red,
-        custom_id="close_ticket_btn_v6",
-    )
+    @discord.ui.button(label="إغلاق التذكرة", style=discord.ButtonStyle.red,
+                       custom_id="close_ticket_btn_v6")
     async def close_ticket(self, interaction: discord.Interaction, button: Button):
         role = get_role_ticket(interaction.guild)
         if not ((role and role in interaction.user.roles) or has_control(interaction.user.id)):
             await interaction.response.send_message("لا تمتلك الصلاحية.", ephemeral=True)
             return
-        await interaction.response.send_message(
-            "سيتم حذف التذكرة خلال ثانيتين...", ephemeral=True
-        )
+        await interaction.response.send_message("سيتم حذف التذكرة خلال ثانيتين...", ephemeral=True)
         await asyncio.sleep(2)
         try:
             await interaction.channel.delete()
@@ -2401,29 +2114,21 @@ class CloseTicketButton(View):
             pass
 
 
-# --- زر فتح التذكرة ---
 class TicketButtonView(View):
     def __init__(self):
         super().__init__(timeout=None)
 
-    @discord.ui.button(
-        label="فتح تذكرة",
-        style=discord.ButtonStyle.primary,
-        custom_id="open_ticket_btn_v6",
-    )
+    @discord.ui.button(label="فتح تذكرة", style=discord.ButtonStyle.primary,
+                       custom_id="open_ticket_btn_v6")
     async def open_ticket(self, interaction: discord.Interaction, button: Button):
         guild = interaction.guild
         category = get_cat_ticket(guild)
         if not category:
-            await interaction.response.send_message(
-                "لم أجد تصنيف التذاكر.", ephemeral=True
-            )
+            await interaction.response.send_message("لم أجد تصنيف التذاكر.", ephemeral=True)
             return
 
-        # استخدام ID العضو بدل الاسم
         channel_name = "ticket-" + str(interaction.user.id)
 
-        # فحص قوي: أي تذكرة فيها آيدي المستخدم
         existing = None
         for ch in category.text_channels:
             if ch.name == channel_name or str(interaction.user.id) in ch.name:
@@ -2433,59 +2138,41 @@ class TicketButtonView(View):
 
         if existing:
             await interaction.response.send_message(
-                "لديك تذكرة مفتوحة: " + existing.mention, ephemeral=True
-            )
+                "لديك تذكرة مفتوحة: " + existing.mention, ephemeral=True)
             return
 
         ticket_role = get_role_ticket(guild)
         overwrites = {
             guild.default_role: discord.PermissionOverwrite(view_channel=False),
             interaction.user: discord.PermissionOverwrite(
-                view_channel=True, send_messages=True, read_message_history=True
-            ),
+                view_channel=True, send_messages=True, read_message_history=True),
             guild.me: discord.PermissionOverwrite(view_channel=True, send_messages=True),
         }
         if ticket_role:
             overwrites[ticket_role] = discord.PermissionOverwrite(
-                view_channel=True, send_messages=True, read_message_history=True
-            )
+                view_channel=True, send_messages=True, read_message_history=True)
 
         try:
-            ch = await guild.create_text_channel(
-                channel_name, category=category, overwrites=overwrites
-            )
+            ch = await guild.create_text_channel(channel_name, category=category,
+                                                 overwrites=overwrites)
         except Exception as e:
-            await interaction.response.send_message(
-                "فشل إنشاء التذكرة: " + str(e), ephemeral=True
-            )
+            await interaction.response.send_message("فشل إنشاء التذكرة: " + str(e), ephemeral=True)
             return
 
-        embed = discord.Embed(
-            title="تذكرة جديدة",
-            description="اكتب مشكلتك وسيتم الرد عليك قريبا.",
-            color=discord.Color.blue(),
-        )
-        embed.set_footer(
-            text="صاحب التذكرة: " + str(interaction.user)
-            + " (" + str(interaction.user.id) + ")"
-        )
+        embed = discord.Embed(title="تذكرة جديدة",
+                              description="اكتب مشكلتك وسيتم الرد عليك قريبا.",
+                              color=discord.Color.blue())
+        embed.set_footer(text="صاحب التذكرة: " + str(interaction.user) + " (" + str(interaction.user.id) + ")")
 
-        await ch.send(
-            content=interaction.user.mention,
-            embed=embed,
-            view=CloseTicketButton(),
-        )
-        await interaction.response.send_message(
-            "تم فتح تذكرتك: " + ch.mention, ephemeral=True
-        )
+        await ch.send(content=interaction.user.mention, embed=embed, view=CloseTicketButton())
+        await interaction.response.send_message("تم فتح تذكرتك: " + ch.mention, ephemeral=True)
 
 
 # ═══════════════════════════════════════════════════════════════
-# ⚙️ القسم 20أ: أوامر الحماية والعقوبات
+# ⚙️ القسم 18: الأوامر
 # ═══════════════════════════════════════════════════════════════
 
-# --- فحص الإعدادات ---
-@bot.tree.command(name="فحص_الاعدادات", description="يفحص وجود جميع الرومات والرتب")
+@bot.tree.command(name="فحص_الاعدادات", description="يفحص الرومات والرتب")
 async def check_setup(interaction: discord.Interaction):
     if not await require_control(interaction):
         return
@@ -2534,13 +2221,8 @@ async def check_setup(interaction: discord.Interaction):
         description="\n".join(results[:25]),
         color=discord.Color.blue() if not missing else discord.Color.orange(),
     )
-
     if missing:
-        embed.add_field(
-            name="ناقص",
-            value="\n".join("- " + m for m in missing[:10]),
-            inline=False,
-        )
+        embed.add_field(name="ناقص", value="\n".join("- " + m for m in missing[:10]), inline=False)
         embed.set_footer(text="أضف الآيدي مباشرة في config.py")
     else:
         embed.add_field(name="الحالة", value="كل الإعدادات جاهزة!", inline=False)
@@ -2548,8 +2230,7 @@ async def check_setup(interaction: discord.Interaction):
     await interaction.followup.send(embed=embed, ephemeral=True)
 
 
-# --- اختبار الحماية ---
-@bot.tree.command(name="اختبار_الحماية", description="فحص شامل لكل أنظمة الحماية")
+@bot.tree.command(name="اختبار_الحماية", description="فحص أنظمة الحماية")
 async def test_protection(interaction: discord.Interaction):
     if not await require_control(interaction):
         return
@@ -2558,7 +2239,6 @@ async def test_protection(interaction: discord.Interaction):
     me = guild.me
 
     checks = []
-
     perms_needed = [
         ("manage_roles", "إدارة الرتب"),
         ("manage_channels", "إدارة الرومات"),
@@ -2582,30 +2262,25 @@ async def test_protection(interaction: discord.Interaction):
         else:
             checks.append("MISSING رتبة البوت ليست أعلى من " + jail_role.name)
 
+    checks.append("MongoDB: " + ("مفعّل" if config.MONGO_ENABLED else "معطّل"))
+
     cache = GUILD_CACHE.get(guild.id, {})
-    ch_count = len(cache.get("channels", {}))
-    rl_count = len(cache.get("roles", {}))
-    checks.append("Cache: " + str(ch_count) + " روم / " + str(rl_count) + " رتبة")
+    checks.append("Cache: " + str(len(cache.get("channels", {}))) + " روم / "
+                  + str(len(cache.get("roles", {}))) + " رتبة")
 
     if config.ANTI_NUKE_ENABLED:
         checks.append("OK Anti-Nuke مفعّل (" + str(len(config.ANTI_NUKE_THRESHOLDS)) + " حدث)")
-    else:
-        checks.append("Anti-Nuke معطّل")
-
     if config.ANTI_PHISHING_ENABLED:
         checks.append("OK Anti-Phishing مفعّل")
     if config.AUTOMOD_ENABLED:
         checks.append("OK Auto-Mod مفعّل")
 
-    embed = discord.Embed(
-        title="اختبار الحماية",
-        description="\n".join(checks[:25]),
-        color=discord.Color.green(),
-    )
+    embed = discord.Embed(title="اختبار الحماية",
+                          description="\n".join(checks[:25]),
+                          color=discord.Color.green())
     await interaction.followup.send(embed=embed, ephemeral=True)
 
 
-# --- طرد ---
 @bot.tree.command(name="طرد", description="طرد عضو")
 @discord.app_commands.describe(member="العضو", reason="السبب")
 async def kick_cmd(interaction: discord.Interaction, member: discord.Member,
@@ -2615,8 +2290,7 @@ async def kick_cmd(interaction: discord.Interaction, member: discord.Member,
     allowed, wait = check_rate_limit(interaction.user.id, "طرد")
     if not allowed:
         await interaction.response.send_message(
-            "تجاوزت الحد. انتظر " + str(wait) + " ثانية.", ephemeral=True
-        )
+            "تجاوزت الحد. انتظر " + str(wait) + " ثانية.", ephemeral=True)
         return
 
     ok, why = can_act_on(interaction.user, member, interaction.guild)
@@ -2628,11 +2302,8 @@ async def kick_cmd(interaction: discord.Interaction, member: discord.Member,
         await member.kick(reason="بواسطة " + str(interaction.user) + ": " + reason)
         log_ch = get_ch_log_ban(interaction.guild) or get_ch_admin_review(interaction.guild)
         if log_ch:
-            embed = discord.Embed(
-                title="طرد عضو",
-                color=discord.Color.red(),
-                timestamp=discord.utils.utcnow(),
-            )
+            embed = discord.Embed(title="طرد عضو", color=discord.Color.red(),
+                                  timestamp=discord.utils.utcnow())
             embed.add_field(name="العضو", value=str(member) + " (" + str(member.id) + ")", inline=False)
             embed.add_field(name="بواسطة", value=interaction.user.mention, inline=False)
             embed.add_field(name="السبب", value=reason, inline=False)
@@ -2645,8 +2316,7 @@ async def kick_cmd(interaction: discord.Interaction, member: discord.Member,
         await interaction.response.send_message("فشل الطرد: " + str(e), ephemeral=True)
 
 
-# --- تحذير ---
-@bot.tree.command(name="تحذير", description="تحذير رسمي لعضو")
+@bot.tree.command(name="تحذير", description="تحذير رسمي")
 @discord.app_commands.describe(member="العضو", reason="السبب")
 async def warn_cmd(interaction: discord.Interaction, member: discord.Member,
                    reason: str = "لم يحدد"):
@@ -2655,8 +2325,7 @@ async def warn_cmd(interaction: discord.Interaction, member: discord.Member,
     allowed, wait = check_rate_limit(interaction.user.id, "تحذير")
     if not allowed:
         await interaction.response.send_message(
-            "تجاوزت الحد. انتظر " + str(wait) + " ثانية.", ephemeral=True
-        )
+            "تجاوزت الحد. انتظر " + str(wait) + " ثانية.", ephemeral=True)
         return
 
     if is_exempted(member):
@@ -2672,28 +2341,21 @@ async def warn_cmd(interaction: discord.Interaction, member: discord.Member,
     warn_count = len(USER_WARNINGS[member.id])
 
     try:
-        await member.send(
-            "تحذير من " + interaction.guild.name + "\n"
-            "السبب: " + reason + "\nإجمالي: " + str(warn_count)
-        )
+        await member.send("تحذير من " + interaction.guild.name + "\n"
+                          "السبب: " + reason + "\nإجمالي: " + str(warn_count))
     except Exception:
         pass
 
     jailed_msg = ""
     if warn_count >= 3:
-        ok, msg = await apply_jail(
-            interaction.guild, member,
-            "بلوغ " + str(warn_count) + " تحذيرات",
-        )
+        ok, msg = await apply_jail(interaction.guild, member,
+                                   "بلوغ " + str(warn_count) + " تحذيرات")
         jailed_msg = "\n" + msg + " (حجر دائم)"
 
     admin_ch = get_ch_admin_review(interaction.guild)
     if admin_ch:
-        embed = discord.Embed(
-            title="تحذير جديد",
-            color=discord.Color.gold(),
-            timestamp=discord.utils.utcnow(),
-        )
+        embed = discord.Embed(title="تحذير جديد", color=discord.Color.gold(),
+                              timestamp=discord.utils.utcnow())
         embed.add_field(name="العضو", value=member.mention, inline=True)
         embed.add_field(name="بواسطة", value=interaction.user.mention, inline=True)
         embed.add_field(name="السبب", value=reason, inline=False)
@@ -2705,37 +2367,28 @@ async def warn_cmd(interaction: discord.Interaction, member: discord.Member,
 
     await interaction.response.send_message(
         "تحذير لـ " + member.mention + " (إجمالي: " + str(warn_count) + ")" + jailed_msg,
-        ephemeral=True,
-    )
+        ephemeral=True)
 
 
-# --- عرض التحذيرات ---
-@bot.tree.command(name="التحذيرات", description="عرض تحذيرات عضو")
+@bot.tree.command(name="التحذيرات", description="عرض تحذيرات")
 @discord.app_commands.describe(member="العضو")
 async def check_warnings_cmd(interaction: discord.Interaction, member: discord.Member):
     warnings = USER_WARNINGS.get(member.id, [])
-    embed = discord.Embed(
-        title="تحذيرات " + member.display_name,
-        color=discord.Color.orange(),
-    )
+    embed = discord.Embed(title="تحذيرات " + member.display_name,
+                          color=discord.Color.orange())
     embed.set_thumbnail(url=member.display_avatar.url)
     embed.add_field(name="الإجمالي", value=str(len(warnings)), inline=False)
-
     if warnings:
-        details = "\n".join(
-            str(i) + ". " + w["reason"] + " -- بواسطة " + w["warned_by"]
-            + " (" + w["date"] + ")"
-            for i, w in enumerate(warnings, 1)
-        )
+        details = "\n".join(str(i) + ". " + w["reason"] + " -- بواسطة "
+                            + w["warned_by"] + " (" + w["date"] + ")"
+                            for i, w in enumerate(warnings, 1))
         embed.add_field(name="التفاصيل", value=details[:1024], inline=False)
     else:
         embed.description = "لا يوجد تحذيرات."
-
     await interaction.response.send_message(embed=embed, ephemeral=True)
 
 
-# --- حجر دائم ---
-@bot.tree.command(name="حجر", description="حجر دائم لعضو")
+@bot.tree.command(name="حجر", description="حجر دائم")
 @discord.app_commands.describe(member="العضو", reason="السبب")
 async def jail_cmd(interaction: discord.Interaction, member: discord.Member,
                    reason: str = "لم يحدد"):
@@ -2744,23 +2397,16 @@ async def jail_cmd(interaction: discord.Interaction, member: discord.Member,
     allowed, wait = check_rate_limit(interaction.user.id, "حجر")
     if not allowed:
         await interaction.response.send_message(
-            "تجاوزت الحد. انتظر " + str(wait) + " ثانية.", ephemeral=True
-        )
+            "تجاوزت الحد. انتظر " + str(wait) + " ثانية.", ephemeral=True)
         return
 
-    ok, msg = await apply_jail(
-        interaction.guild, member,
-        "حجر دائم بواسطة " + str(interaction.user) + ": " + reason,
-    )
-
+    ok, msg = await apply_jail(interaction.guild, member,
+                               "حجر دائم بواسطة " + str(interaction.user) + ": " + reason)
     if ok:
         admin_ch = get_ch_admin_review(interaction.guild)
         if admin_ch:
-            embed = discord.Embed(
-                title="حجر دائم",
-                color=discord.Color.dark_red(),
-                timestamp=discord.utils.utcnow(),
-            )
+            embed = discord.Embed(title="حجر دائم", color=discord.Color.dark_red(),
+                                  timestamp=discord.utils.utcnow())
             embed.add_field(name="العضو", value=member.mention, inline=False)
             embed.add_field(name="بواسطة", value=interaction.user.mention, inline=False)
             embed.add_field(name="السبب", value=reason, inline=False)
@@ -2768,72 +2414,50 @@ async def jail_cmd(interaction: discord.Interaction, member: discord.Member,
                 await admin_ch.send(embed=embed)
             except Exception:
                 pass
-
     await interaction.response.send_message(msg, ephemeral=True)
 
 
-# --- فك الحجر ---
-@bot.tree.command(name="فك_الحجر", description="فك حجر عضو + تصفير تحذيراته")
+@bot.tree.command(name="فك_الحجر", description="فك حجر عضو")
 @discord.app_commands.describe(member="العضو")
 async def unjail_cmd(interaction: discord.Interaction, member: discord.Member):
     if not await require_control(interaction):
         return
-
     ok, msg = await remove_jail(interaction.guild, member)
-
     if member.id in USER_WARNINGS:
         del USER_WARNINGS[member.id]
         await save_warnings()
-
-    await interaction.response.send_message(
-        msg + "\nتم تصفير التحذيرات أيضاً.", ephemeral=True
-    )
+    await interaction.response.send_message(msg + "\nتم تصفير التحذيرات.", ephemeral=True)
 
 
-# --- تصفير المخالفات ---
-@bot.tree.command(name="تصفير_مخالفات", description="تصفير تحذيرات عضو")
+@bot.tree.command(name="تصفير_مخالفات", description="تصفير تحذيرات")
 @discord.app_commands.describe(member="العضو")
 async def reset_violations_cmd(interaction: discord.Interaction, member: discord.Member):
     if not await require_control(interaction):
         return
-
     if member.id in USER_WARNINGS:
         del USER_WARNINGS[member.id]
         await save_warnings()
-        await interaction.response.send_message(
-            "تم تصفير تحذيرات " + member.mention + ".", ephemeral=True
-        )
+        await interaction.response.send_message("تم تصفير تحذيرات " + member.mention + ".", ephemeral=True)
     else:
-        await interaction.response.send_message(
-            "لا توجد تحذيرات لـ " + member.mention + ".", ephemeral=True
-        )
+        await interaction.response.send_message("لا توجد تحذيرات لـ " + member.mention + ".", ephemeral=True)
 
 
-# --- تصفير النيوكات ---
-@bot.tree.command(name="تصفير_نيوك", description="تصفير سجل النيوكات لعضو")
+@bot.tree.command(name="تصفير_نيوك", description="تصفير النيوكات")
 @discord.app_commands.describe(member="العضو")
 async def reset_nuke_cmd(interaction: discord.Interaction, member: discord.Member):
     if not await require_control(interaction):
         return
-
     gid = interaction.guild.id
     if member.id in NUKE_STRIKES[gid]:
         del NUKE_STRIKES[gid][member.id]
         await save_nuke_strikes()
         clear_user_tracker(gid, member.id)
-        await interaction.response.send_message(
-            "تم تصفير سجل النيوكات لـ " + member.mention + ".", ephemeral=True
-        )
+        await interaction.response.send_message("تم تصفير سجل النيوكات لـ " + member.mention + ".", ephemeral=True)
     else:
-        await interaction.response.send_message(
-            "لا يوجد سجل نيوكات لـ " + member.mention + ".", ephemeral=True
-        )
-# ═══════════════════════════════════════════════════════════════
-# 👑 القسم 20ب: أوامر النواب والحماية
-# ═══════════════════════════════════════════════════════════════
+        await interaction.response.send_message("لا يوجد سجل نيوكات لـ " + member.mention + ".", ephemeral=True)
 
-# --- تعيين نائب ---
-@bot.tree.command(name="تعيين_نائب", description="تعيين نائب (المالك فقط)")
+
+@bot.tree.command(name="تعيين_نائب", description="تعيين نائب (المالك)")
 @discord.app_commands.describe(member="العضو")
 async def setdeputy_cmd(interaction: discord.Interaction, member: discord.Member):
     if not await require_owner(interaction):
@@ -2843,13 +2467,10 @@ async def setdeputy_cmd(interaction: discord.Interaction, member: discord.Member
         return
     deputy_user_ids.append(member.id)
     await save_state()
-    await interaction.response.send_message(
-        "تم تعيين " + member.mention + " نائبا.", ephemeral=True
-    )
+    await interaction.response.send_message("تم تعيين " + member.mention + " نائبا.", ephemeral=True)
 
 
-# --- إزالة نائب ---
-@bot.tree.command(name="إزالة_نائب", description="إزالة نائب (المالك فقط)")
+@bot.tree.command(name="إزالة_نائب", description="إزالة نائب (المالك)")
 @discord.app_commands.describe(member="العضو")
 async def removedeputy_cmd(interaction: discord.Interaction, member: discord.Member):
     if not await require_owner(interaction):
@@ -2859,12 +2480,9 @@ async def removedeputy_cmd(interaction: discord.Interaction, member: discord.Mem
         return
     deputy_user_ids.remove(member.id)
     await save_state()
-    await interaction.response.send_message(
-        "أزيلت صفة النائب عن " + member.mention + ".", ephemeral=True
-    )
+    await interaction.response.send_message("أزيلت صفة النائب عن " + member.mention + ".", ephemeral=True)
 
 
-# --- حماية شخص ---
 @bot.tree.command(name="حماية_شخص", description="حماية شخص")
 @discord.app_commands.describe(member="العضو")
 async def protect_person_cmd(interaction: discord.Interaction, member: discord.Member):
@@ -2878,7 +2496,6 @@ async def protect_person_cmd(interaction: discord.Interaction, member: discord.M
     await interaction.response.send_message("تم حماية " + member.mention + ".", ephemeral=True)
 
 
-# --- إزالة حماية شخص ---
 @bot.tree.command(name="إزالة_حماية_شخص", description="إزالة حماية شخص")
 @discord.app_commands.describe(member="العضو")
 async def unprotect_person_cmd(interaction: discord.Interaction, member: discord.Member):
@@ -2892,8 +2509,7 @@ async def unprotect_person_cmd(interaction: discord.Interaction, member: discord
     await interaction.response.send_message("أزيلت حماية " + member.mention + ".", ephemeral=True)
 
 
-# --- حماية رتبة ---
-@bot.tree.command(name="حماية_رتبه", description="حماية رتبة من الحذف/التعديل")
+@bot.tree.command(name="حماية_رتبه", description="حماية رتبة")
 @discord.app_commands.describe(role="الرتبة")
 async def protect_role_cmd(interaction: discord.Interaction, role: discord.Role):
     if not await require_control(interaction):
@@ -2906,7 +2522,6 @@ async def protect_role_cmd(interaction: discord.Interaction, role: discord.Role)
     await interaction.response.send_message("تم حماية " + role.mention + ".", ephemeral=True)
 
 
-# --- إزالة حماية رتبة ---
 @bot.tree.command(name="إزالة_حماية_رتبه", description="إزالة حماية رتبة")
 @discord.app_commands.describe(role="الرتبة")
 async def unprotect_role_cmd(interaction: discord.Interaction, role: discord.Role):
@@ -2920,52 +2535,28 @@ async def unprotect_role_cmd(interaction: discord.Interaction, role: discord.Rol
     await interaction.response.send_message("أزيلت حماية " + role.mention + ".", ephemeral=True)
 
 
-# --- لوحة الحماية ---
 @bot.tree.command(name="قائمة_الحماية", description="عرض قوائم الحماية")
 async def protection_dashboard_cmd(interaction: discord.Interaction):
     embed = discord.Embed(title="لوحة الحماية", color=discord.Color.gold())
-
-    users_text = "\n".join(
-        "- <@" + str(uid) + ">" for uid in protected_users_list
-        if interaction.guild.get_member(uid)
-    ) or "لا يوجد"
-
-    roles_text = "\n".join(
-        "- <@&" + str(rid) + ">" for rid in protected_roles_list
-        if interaction.guild.get_role(rid)
-    ) or "لا توجد"
-
-    deputies_text = "\n".join(
-        "- <@" + str(uid) + ">" for uid in deputy_user_ids
-        if interaction.guild.get_member(uid)
-    ) or "لا يوجد"
-
-    bots_text = "\n".join(
-        "- <@" + str(bid) + ">" for bid in trusted_bots
-    ) or "لا يوجد"
-
-    embed.add_field(
-        name="محميون (" + str(len(protected_users_list)) + ")",
-        value=users_text[:1024], inline=False,
-    )
-    embed.add_field(
-        name="رتب محمية (" + str(len(protected_roles_list)) + ")",
-        value=roles_text[:1024], inline=False,
-    )
-    embed.add_field(
-        name="نواب (" + str(len(deputy_user_ids)) + ")",
-        value=deputies_text[:1024], inline=False,
-    )
-    embed.add_field(
-        name="بوتات موثوقة (" + str(len(trusted_bots)) + ")",
-        value=bots_text[:1024], inline=False,
-    )
-
+    users_text = "\n".join("- <@" + str(uid) + ">" for uid in protected_users_list
+                           if interaction.guild.get_member(uid)) or "لا يوجد"
+    roles_text = "\n".join("- <@&" + str(rid) + ">" for rid in protected_roles_list
+                           if interaction.guild.get_role(rid)) or "لا توجد"
+    deputies_text = "\n".join("- <@" + str(uid) + ">" for uid in deputy_user_ids
+                              if interaction.guild.get_member(uid)) or "لا يوجد"
+    bots_text = "\n".join("- <@" + str(bid) + ">" for bid in trusted_bots) or "لا يوجد"
+    embed.add_field(name="محميون (" + str(len(protected_users_list)) + ")",
+                    value=users_text[:1024], inline=False)
+    embed.add_field(name="رتب محمية (" + str(len(protected_roles_list)) + ")",
+                    value=roles_text[:1024], inline=False)
+    embed.add_field(name="نواب (" + str(len(deputy_user_ids)) + ")",
+                    value=deputies_text[:1024], inline=False)
+    embed.add_field(name="بوتات موثوقة (" + str(len(trusted_bots)) + ")",
+                    value=bots_text[:1024], inline=False)
     await interaction.response.send_message(embed=embed, ephemeral=True)
 
 
-# --- توثيق بوت ---
-@bot.tree.command(name="بوت_موثوق", description="إضافة بوت لقائمة الموثوقين")
+@bot.tree.command(name="بوت_موثوق", description="توثيق بوت")
 @discord.app_commands.describe(bot_member="البوت")
 async def trust_bot_cmd(interaction: discord.Interaction, bot_member: discord.Member):
     if not await require_control(interaction):
@@ -2978,13 +2569,10 @@ async def trust_bot_cmd(interaction: discord.Interaction, bot_member: discord.Me
         return
     trusted_bots.append(bot_member.id)
     await save_state()
-    await interaction.response.send_message(
-        "تم توثيق البوت " + bot_member.mention + ".", ephemeral=True
-    )
+    await interaction.response.send_message("تم توثيق البوت " + bot_member.mention + ".", ephemeral=True)
 
 
-# --- إزالة توثيق بوت ---
-@bot.tree.command(name="إزالة_بوت_موثوق", description="إزالة بوت من قائمة الموثوقين")
+@bot.tree.command(name="إزالة_بوت_موثوق", description="إزالة توثيق بوت")
 @discord.app_commands.describe(bot_member="البوت")
 async def untrust_bot_cmd(interaction: discord.Interaction, bot_member: discord.Member):
     if not await require_control(interaction):
@@ -2994,63 +2582,39 @@ async def untrust_bot_cmd(interaction: discord.Interaction, bot_member: discord.
         return
     trusted_bots.remove(bot_member.id)
     await save_state()
-    await interaction.response.send_message(
-        "أزيل توثيق " + bot_member.mention + ".", ephemeral=True
-    )
+    await interaction.response.send_message("أزيل توثيق " + bot_member.mention + ".", ephemeral=True)
 
 
-# ═══════════════════════════════════════════════════════════════
-# 🔨 القسم 20ج: أوامر الحماية المتقدمة
-# ═══════════════════════════════════════════════════════════════
-
-# --- حالة Anti-Nuke ---
-@bot.tree.command(name="anti_nuke", description="تفعيل/تعطيل نظام Anti-Nuke")
+@bot.tree.command(name="anti_nuke", description="حالة Anti-Nuke")
 @discord.app_commands.describe(state="on / off / status")
 async def antinuke_cmd(interaction: discord.Interaction, state: str = "status"):
     if not await require_control(interaction):
         return
-
     state = state.lower()
-
     if state == "status":
         status = "مفعّل" if config.ANTI_NUKE_ENABLED else "معطّل"
-        lines = [
-            "الحالة: " + status,
-            "العقوبة: " + config.ANTI_NUKE_PUNISHMENT,
-            "تحذير متدرج: " + ("نعم" if config.GRADUATED_NUKE_PUNISHMENT else "لا"),
-            "",
-            "العتبات:",
-        ]
+        lines = ["الحالة: " + status,
+                 "العقوبة: " + config.ANTI_NUKE_PUNISHMENT,
+                 "تحذير متدرج: " + ("نعم" if config.GRADUATED_NUKE_PUNISHMENT else "لا"),
+                 "", "العتبات:"]
         for action, cfg in config.ANTI_NUKE_THRESHOLDS.items():
-            lines.append(
-                "- " + action + ": " + str(cfg["count"]) + " / " + str(cfg["seconds"]) + "ث"
-            )
-
-        embed = discord.Embed(
-            title="حالة Anti-Nuke",
-            description="\n".join(lines),
-            color=discord.Color.green() if config.ANTI_NUKE_ENABLED
-            else discord.Color.red(),
-        )
+            lines.append("- " + action + ": " + str(cfg["count"]) + " / " + str(cfg["seconds"]) + "ث")
+        embed = discord.Embed(title="حالة Anti-Nuke", description="\n".join(lines),
+                              color=discord.Color.green() if config.ANTI_NUKE_ENABLED
+                              else discord.Color.red())
         await interaction.response.send_message(embed=embed, ephemeral=True)
         return
-
     if state == "on":
         config.ANTI_NUKE_ENABLED = True
         await interaction.response.send_message("تم تفعيل Anti-Nuke.", ephemeral=True)
     elif state == "off":
         config.ANTI_NUKE_ENABLED = False
-        await interaction.response.send_message(
-            "تم تعطيل Anti-Nuke (لحين إعادة التشغيل).", ephemeral=True
-        )
+        await interaction.response.send_message("تم تعطيل Anti-Nuke.", ephemeral=True)
     else:
-        await interaction.response.send_message(
-            "استخدم: on / off / status", ephemeral=True
-        )
+        await interaction.response.send_message("استخدم: on / off / status", ephemeral=True)
 
 
-# --- أخذ لقطة جديدة ---
-@bot.tree.command(name="اعادة_لقطه", description="أخذ لقطة جديدة من السيرفر")
+@bot.tree.command(name="اعادة_لقطه", description="لقطة جديدة")
 async def refresh_cache_cmd(interaction: discord.Interaction):
     if not await require_control(interaction):
         return
@@ -3059,13 +2623,10 @@ async def refresh_cache_cmd(interaction: discord.Interaction):
     backup_guild_name(interaction.guild)
     await backup_guild_icon(interaction.guild)
     await backup_guild_banner(interaction.guild)
-    await interaction.followup.send(
-        "تم أخذ لقطة جديدة وحفظ النسخ الاحتياطية.", ephemeral=True
-    )
+    await interaction.followup.send("تم أخذ لقطة جديدة وحفظ النسخ.", ephemeral=True)
 
 
-# --- استرجاع اسم السيرفر ---
-@bot.tree.command(name="استرجاع_الاسم", description="استرجاع آخر اسم للسيرفر")
+@bot.tree.command(name="استرجاع_الاسم", description="استرجاع اسم السيرفر")
 async def restore_name_cmd(interaction: discord.Interaction):
     if not await require_control(interaction):
         return
@@ -3073,8 +2634,7 @@ async def restore_name_cmd(interaction: discord.Interaction):
     await interaction.response.send_message(msg, ephemeral=True)
 
 
-# --- استرجاع أيقونة السيرفر ---
-@bot.tree.command(name="استرجاع_الايقونه", description="استرجاع آخر أيقونة للسيرفر")
+@bot.tree.command(name="استرجاع_الايقونه", description="استرجاع أيقونة السيرفر")
 async def restore_icon_cmd(interaction: discord.Interaction):
     if not await require_control(interaction):
         return
@@ -3082,8 +2642,7 @@ async def restore_icon_cmd(interaction: discord.Interaction):
     await interaction.response.send_message(msg, ephemeral=True)
 
 
-# --- استرجاع بانر السيرفر ---
-@bot.tree.command(name="استرجاع_البانر", description="استرجاع آخر بانر للسيرفر")
+@bot.tree.command(name="استرجاع_البانر", description="استرجاع بانر السيرفر")
 async def restore_banner_cmd(interaction: discord.Interaction):
     if not await require_control(interaction):
         return
@@ -3091,8 +2650,7 @@ async def restore_banner_cmd(interaction: discord.Interaction):
     await interaction.response.send_message(msg, ephemeral=True)
 
 
-# --- تحديد روم صوتي دائم ---
-@bot.tree.command(name="روم_صوتي", description="تحديد روم صوتي دائم للبوت")
+@bot.tree.command(name="روم_صوتي", description="تحديد روم صوتي دائم")
 @discord.app_commands.describe(voice_channel="الروم الصوتي")
 async def voice_cmd(interaction: discord.Interaction, voice_channel: discord.VoiceChannel):
     if not await require_control(interaction):
@@ -3105,56 +2663,33 @@ async def voice_cmd(interaction: discord.Interaction, voice_channel: discord.Voi
         if interaction.guild.me.voice:
             await interaction.guild.me.voice.disconnect()
         await voice_channel.connect()
-        await interaction.followup.send(
-            "تم الاتصال بـ " + voice_channel.name + ".", ephemeral=True
-        )
+        await interaction.followup.send("تم الاتصال بـ " + voice_channel.name + ".", ephemeral=True)
     except Exception as e:
         await interaction.followup.send("فشل الاتصال: " + str(e), ephemeral=True)
 
 
-# ═══════════════════════════════════════════════════════════════
-# 📢 القسم 20د: أوامر البانل (التذاكر + التقديم)
-# ═══════════════════════════════════════════════════════════════
-
-# --- بانل التذاكر ---
-@bot.tree.command(name="بانل_التذاكر", description="إرسال بانل التذاكر في هذا الروم")
+@bot.tree.command(name="بانل_التذاكر", description="إرسال بانل التذاكر")
 async def send_ticket_panel(interaction: discord.Interaction):
     if not await require_control(interaction):
         return
-
-    embed = discord.Embed(
-        title="مركز الدعم الفني",
-        description="اضغط على الزر أدناه لفتح تذكرة خاصة للتواصل مع الإدارة.",
-        color=discord.Color.green(),
-    )
+    embed = discord.Embed(title="مركز الدعم الفني",
+                          description="اضغط على الزر أدناه لفتح تذكرة.",
+                          color=discord.Color.green())
     await interaction.channel.send(embed=embed, view=TicketButtonView())
-    await interaction.response.send_message(
-        "تم إرسال بانل التذاكر.", ephemeral=True
-    )
+    await interaction.response.send_message("تم إرسال بانل التذاكر.", ephemeral=True)
 
 
-# --- بانل التقديم ---
-@bot.tree.command(name="بانل_التقديم", description="إرسال بانل التقديم في هذا الروم")
+@bot.tree.command(name="بانل_التقديم", description="إرسال بانل التقديم")
 async def send_apply_panel(interaction: discord.Interaction):
     if not await require_control(interaction):
         return
-
-    embed = discord.Embed(
-        title="التقديم لفريق الإدارة",
-        description="اضغط على الزر أدناه لتعبئة استمارة التقديم.",
-        color=discord.Color.purple(),
-    )
+    embed = discord.Embed(title="التقديم لفريق الإدارة",
+                          description="اضغط على الزر أدناه لتعبئة الاستمارة.",
+                          color=discord.Color.purple())
     await interaction.channel.send(embed=embed, view=ApplicationButtonView())
-    await interaction.response.send_message(
-        "تم إرسال بانل التقديم.", ephemeral=True
-    )
+    await interaction.response.send_message("تم إرسال بانل التقديم.", ephemeral=True)
 
 
-# ═══════════════════════════════════════════════════════════════
-# 💬 القسم 20هـ: أوامر عامة
-# ═══════════════════════════════════════════════════════════════
-
-# --- حذف رسائل ---
 @bot.tree.command(name="مسح", description="حذف رسائل")
 @discord.app_commands.describe(amount="عدد الرسائل (1-100)")
 async def clear_cmd(interaction: discord.Interaction, amount: int):
@@ -3163,8 +2698,7 @@ async def clear_cmd(interaction: discord.Interaction, amount: int):
     allowed, wait = check_rate_limit(interaction.user.id, "مسح")
     if not allowed:
         await interaction.response.send_message(
-            "تجاوزت الحد. انتظر " + str(wait) + " ثانية.", ephemeral=True
-        )
+            "تجاوزت الحد. انتظر " + str(wait) + " ثانية.", ephemeral=True)
         return
     if not 1 <= amount <= 100:
         await interaction.response.send_message("المدى 1-100 فقط.", ephemeral=True)
@@ -3172,14 +2706,11 @@ async def clear_cmd(interaction: discord.Interaction, amount: int):
     await interaction.response.defer(ephemeral=True)
     try:
         deleted = await interaction.channel.purge(limit=amount)
-        await interaction.followup.send(
-            "حذفت " + str(len(deleted)) + " رسالة.", ephemeral=True
-        )
+        await interaction.followup.send("حذفت " + str(len(deleted)) + " رسالة.", ephemeral=True)
     except Exception as e:
         await interaction.followup.send("فشل الحذف: " + str(e), ephemeral=True)
 
 
-# --- نشر إعلان ---
 @bot.tree.command(name="اعلان", description="نشر إعلان")
 @discord.app_commands.describe(text="نص الإعلان")
 async def announce_cmd(interaction: discord.Interaction, text: str):
@@ -3188,33 +2719,24 @@ async def announce_cmd(interaction: discord.Interaction, text: str):
     allowed, wait = check_rate_limit(interaction.user.id, "اعلان")
     if not allowed:
         await interaction.response.send_message(
-            "تجاوزت الحد. انتظر " + str(wait) + " ثانية.", ephemeral=True
-        )
+            "تجاوزت الحد. انتظر " + str(wait) + " ثانية.", ephemeral=True)
         return
-
     ch = get_ch_announce(interaction.guild)
     if not ch:
         await interaction.response.send_message("لم أجد روم الإعلانات.", ephemeral=True)
         return
-
     embed = discord.Embed(title="إعلان", description=text, color=discord.Color.gold())
-    embed.set_footer(
-        text="بواسطة " + interaction.user.name,
-        icon_url=interaction.user.display_avatar.url,
-    )
+    embed.set_footer(text="بواسطة " + interaction.user.name,
+                     icon_url=interaction.user.display_avatar.url)
     msg = await ch.send(embed=embed)
     try:
         await msg.pin()
     except Exception:
         pass
-
-    await interaction.response.send_message(
-        "تم النشر في " + ch.mention + ".", ephemeral=True
-    )
+    await interaction.response.send_message("تم النشر في " + ch.mention + ".", ephemeral=True)
 
 
-# --- إرسال رسالة عبر البوت ---
-@bot.tree.command(name="قول", description="إرسال رسالة عبر البوت")
+@bot.tree.command(name="قول", description="إرسال رسالة")
 @discord.app_commands.describe(channel="الروم", message="الرسالة")
 async def say_cmd(interaction: discord.Interaction,
                   channel: discord.TextChannel, message: str):
@@ -3222,15 +2744,12 @@ async def say_cmd(interaction: discord.Interaction,
         return
     try:
         await channel.send(message)
-        await interaction.response.send_message(
-            "أرسلت إلى " + channel.mention + ".", ephemeral=True
-        )
+        await interaction.response.send_message("أرسلت إلى " + channel.mention + ".", ephemeral=True)
     except Exception as e:
         await interaction.response.send_message("فشل: " + str(e), ephemeral=True)
 
 
-# --- إرسال DM ---
-@bot.tree.command(name="خاص", description="إرسال DM عبر البوت")
+@bot.tree.command(name="خاص", description="إرسال DM")
 @discord.app_commands.describe(member="العضو", message="الرسالة")
 async def dm_cmd(interaction: discord.Interaction,
                  member: discord.Member, message: str):
@@ -3238,14 +2757,11 @@ async def dm_cmd(interaction: discord.Interaction,
         return
     try:
         await member.send("رسالة من " + interaction.guild.name + ":\n\n" + message)
-        await interaction.response.send_message(
-            "أرسلت إلى " + member.mention + ".", ephemeral=True
-        )
+        await interaction.response.send_message("أرسلت إلى " + member.mention + ".", ephemeral=True)
     except discord.Forbidden:
         await interaction.response.send_message("الخاصة مقفلة.", ephemeral=True)
 
 
-# --- معلومات المالك ---
 @bot.tree.command(name="المالك", description="معلومات المالك")
 async def owner_info_cmd(interaction: discord.Interaction):
     embed = discord.Embed(title="مالك البوت", color=discord.Color.purple())
@@ -3255,19 +2771,17 @@ async def owner_info_cmd(interaction: discord.Interaction):
 
 
 # ═══════════════════════════════════════════════════════════════
-# 🎬 القسم 21: on_ready
+# 🎬 القسم 19: on_ready
 # ═══════════════════════════════════════════════════════════════
 
 @bot.event
 async def on_ready():
     log.info("البوت متصل: %s (ID: %s)", bot.user, bot.user.id)
 
-    # --- تسجيل الواجهات الدائمة ---
     bot.add_view(TicketButtonView())
     bot.add_view(CloseTicketButton())
     bot.add_view(ApplicationButtonView())
 
-    # --- تحميل cache النسخ الاحتياطية ---
     load_guild_cache()
     for guild in bot.guilds:
         try:
@@ -3278,14 +2792,12 @@ async def on_ready():
         except Exception as e:
             log.warning("فشل تهيئة %s: %s", guild.name, e)
 
-    # --- مزامنة الأوامر ---
     try:
         synced = await bot.tree.sync()
         log.info("تمت مزامنة %d أمر slash", len(synced))
     except Exception as e:
         log.error("فشل مزامنة الأوامر: %s", e)
 
-    # --- الاتصال بالروم الصوتي (إن وجد) ---
     if VOICE_CHANNEL_ID:
         for guild in bot.guilds:
             ch = guild.get_channel(VOICE_CHANNEL_ID)
@@ -3297,7 +2809,7 @@ async def on_ready():
 
 
 # ═══════════════════════════════════════════════════════════════
-# 🚀 القسم 22: main() — نقطة التشغيل
+# 🚀 القسم 20: تحميل الإضافات + main()
 # ═══════════════════════════════════════════════════════════════
 
 def load_extras_module():
@@ -3334,28 +2846,29 @@ def load_extras_module():
         log.exception("خطأ في تحميل extras.py: %s", e)
 
 
-async def _startup_async():
-    """دالة التشغيل Async (تهيئة MongoDB + تحميل الحالة)"""
-
-    # 1. اتصل بـ MongoDB (لو مفعل)
+async def _async_init():
+    """تهيئة غير متزامنة (MongoDB + الحالة) -- تُستدعى من setup_hook"""
     await init_mongodb()
-
-    # 2. حمّل الحالة (من MongoDB أو JSON)
     await load_all_state_async()
-
-    # 3. حمّل extras
     load_extras_module()
 
 
 def main():
     keep_alive()
 
-    # شغّل الـ startup كـ async
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    loop.run_until_complete(_startup_async())
-
     token = os.getenv("DISCORD_TOKEN")
     if not token:
         raise SystemExit("متغير DISCORD_TOKEN غير موجود!")
-    bot.run(token, log_handler=None)
+
+    # ✅ استخدم setup_hook بدل asyncio.run (يتوافق مع discord.py)
+    bot.setup_hook = _async_init
+
+    try:
+        bot.run(token)
+    except Exception as e:
+        log.exception("فشل تشغيل البوت: %s", e)
+        raise
+
+
+if __name__ == "__main__":
+    main()
