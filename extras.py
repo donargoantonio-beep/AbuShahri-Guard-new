@@ -56,19 +56,12 @@ def _save_json(path, data):
 REMINDERS: list = []
 
 
-def parse_duration(text: str) -> Optional[int]:
-    """
-    يحوّل نص مثل 10m / 2h / 1d / 30s إلى ثواني.
-    يدعم الجمع: 1h30m
-    يدعم العربي: 1 ساعة 30 دقيقة
-    """
+def parse_duration(text: str):
+    """يحوّل نص مثل 10m / 2h / 1d / 30s إلى ثواني"""
     if not text:
         return None
 
-    pattern = re.compile(
-        r"(\d+)\s*(d|h|m|s|يوم|ساعة|دقيقة|ثانية)",
-        re.IGNORECASE,
-    )
+    pattern = re.compile(r"(\d+)\s*(d|h|m|s|يوم|ساعة|دقيقة|ثانية)", re.IGNORECASE)
     units = {
         "s": 1, "ثانية": 1,
         "m": 60, "دقيقة": 60,
@@ -78,14 +71,12 @@ def parse_duration(text: str) -> Optional[int]:
 
     total = 0
     found = False
-
     for match in pattern.finditer(text):
         num = int(match.group(1))
         unit = match.group(2).lower()
         if unit in units:
             total += num * units[unit]
             found = True
-
     return total if found and total > 0 else None
 
 
@@ -105,14 +96,35 @@ def format_duration(seconds: int) -> str:
 
 
 def load_reminders():
-    """تحميل التذكيرات من الملف"""
+    """تحميل من JSON (احتياطي)"""
     global REMINDERS
     REMINDERS = _load_json(config.REMINDERS_FILE, [])
 
 
-def save_reminders():
-    """حفظ التذكيرات في الملف"""
+async def save_reminders():
+    """حفظ (MongoDB أو JSON)"""
+    if config.MONGO_ENABLED:
+        try:
+            from main import mongo_save
+            await mongo_save("reminders", {"data": REMINDERS})
+            return
+        except Exception as e:
+            log.warning("فشل حفظ التذكيرات في MongoDB: %s", e)
     _save_json(config.REMINDERS_FILE, REMINDERS)
+
+
+async def sync_reminders_from_mongo():
+    """يسحب التذكيرات من MongoDB"""
+    global REMINDERS
+    if not config.MONGO_ENABLED:
+        return
+    try:
+        from main import mongo_read
+        data = await mongo_read("reminders", {"data": []})
+        REMINDERS = data.get("data", [])
+        log.info("تم تحميل %d تذكير من MongoDB", len(REMINDERS))
+    except Exception as e:
+        log.warning("فشل تحميل التذكيرات من MongoDB: %s", e)
 
 
 async def reminder_loop(bot: commands.Bot):
@@ -150,7 +162,7 @@ async def reminder_loop(bot: commands.Bot):
                     REMINDERS.remove(r)
 
             if due:
-                save_reminders()
+                await save_reminders()
 
         except Exception as e:
             log.exception("خطأ في reminder_loop: %s", e)
@@ -166,22 +178,39 @@ TEMP_ACTIONS: list = []
 
 
 def load_temp_actions():
-    """تحميل العقوبات المؤقتة من الملف"""
+    """تحميل من JSON (احتياطي)"""
     global TEMP_ACTIONS
     TEMP_ACTIONS = _load_json(config.TEMP_ACTIONS_FILE, [])
 
 
-def save_temp_actions():
-    """حفظ العقوبات المؤقتة في الملف"""
+async def save_temp_actions():
+    """حفظ (MongoDB أو JSON)"""
+    if config.MONGO_ENABLED:
+        try:
+            from main import mongo_save
+            await mongo_save("temp_actions", {"data": TEMP_ACTIONS})
+            return
+        except Exception as e:
+            log.warning("فشل حفظ العقوبات في MongoDB: %s", e)
     _save_json(config.TEMP_ACTIONS_FILE, TEMP_ACTIONS)
 
 
+async def sync_temp_actions_from_mongo():
+    """يسحب العقوبات المؤقتة من MongoDB"""
+    global TEMP_ACTIONS
+    if not config.MONGO_ENABLED:
+        return
+    try:
+        from main import mongo_read
+        data = await mongo_read("temp_actions", {"data": []})
+        TEMP_ACTIONS = data.get("data", [])
+        log.info("تم تحميل %d عقوبة مؤقتة من MongoDB", len(TEMP_ACTIONS))
+    except Exception as e:
+        log.warning("فشل تحميل العقوبات من MongoDB: %s", e)
+
+
 async def temp_actions_loop(bot: commands.Bot):
-    """
-    حلقة تتحقق كل 30 ثانية من العقوبات المؤقتة المنتهية.
-    - تفك الحجر تلقائياً
-    - ترسل إشعار في admin-review
-    """
+    """حلقة تتحقق كل 30 ثانية من العقوبات المنتهية"""
     await bot.wait_until_ready()
     log.info("حلقة العقوبات المؤقتة بدأت")
 
@@ -197,7 +226,6 @@ async def temp_actions_loop(bot: commands.Bot):
                 try:
                     guild = bot.get_guild(action["guild_id"])
                     if not guild:
-                        log.warning("السيرفر غير موجود: %s", action["guild_id"])
                         if action in TEMP_ACTIONS:
                             TEMP_ACTIONS.remove(action)
                         continue
@@ -206,19 +234,15 @@ async def temp_actions_loop(bot: commands.Bot):
                     kind = action["type"]
                     member = guild.get_member(user_id)
 
-                    # --- فك الحجر ---
                     if kind == "jail":
                         if member is None:
-                            log.warning("العضو %s ليس في السيرفر -- تخطي", user_id)
+                            log.warning("العضو %s ليس في السيرفر", user_id)
                         else:
                             remove_jail = SHARED.get("remove_jail")
                             if remove_jail:
                                 ok, msg = await remove_jail(guild, member)
                                 log.info("فك حجر %s: %s", member, msg)
-                            else:
-                                log.error("remove_jail غير موجود في SHARED!")
 
-                    # --- إشعار الإدارة ---
                     try:
                         get_ch = SHARED.get("get_ch_admin_review")
                         if get_ch:
@@ -251,14 +275,14 @@ async def temp_actions_loop(bot: commands.Bot):
                     TEMP_ACTIONS.remove(action)
 
             if due:
-                save_temp_actions()
+                await save_temp_actions()
                 log.info("تم إنهاء %d عقوبة مؤقتة", len(due))
 
         except Exception as e:
             log.exception("خطأ في temp_actions_loop: %s", e)
 
         await asyncio.sleep(30)
-        # ═══════════════════════════════════════════════════════════════
+ # ═══════════════════════════════════════════════════════════════
 # 🎣 القسم 5: Anti-Phishing
 # ═══════════════════════════════════════════════════════════════
 
@@ -658,7 +682,7 @@ async def periodic_backup_loop(bot: commands.Bot):
 
         except Exception as e:
             log.exception("خطأ في periodic_backup_loop: %s", e)
-            # ═══════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════
 # ⚙️ القسم 10: الأوامر
 # ═══════════════════════════════════════════════════════════════
 
@@ -707,7 +731,7 @@ def setup_commands(bot: commands.Bot):
             "original_link": getattr(interaction.channel, "jump_url", None),
         }
         REMINDERS.append(reminder)
-        save_reminders()
+        await save_reminders()
 
         await interaction.response.send_message(
             "سأذكرك بعد " + format_duration(seconds) + ".",
@@ -732,13 +756,13 @@ def setup_commands(bot: commands.Bot):
         seconds = parse_duration(duration)
         if not seconds:
             await interaction.response.send_message(
-                "صيغة غير صحيحة. أمثلة: 1h / 1d / 7d", ephemeral=True
+                "صيغة غير صحيحة. أمثلة: 1h / 1d / 7d", ephemeral.",=True
             )
-            return
+            return ephemer
 
-        if seconds > 30 * 86400:
-            await interaction.response.send_message(
-                "الحد 30 يوم.", ephemeral=True
+        ifal seconds > 30 * 86400:
+            await interaction=True.response.send_message(
+                "الحد 30 يوم
             )
             return
 
@@ -769,7 +793,7 @@ def setup_commands(bot: commands.Bot):
             "moderator": interaction.user.id,
             "reason": reason,
         })
-        save_temp_actions()
+        await save_temp_actions()
 
         # إشعار العضو
         try:
