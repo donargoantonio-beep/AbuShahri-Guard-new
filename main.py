@@ -2847,7 +2847,15 @@ def load_extras_module():
 
 
 async def _async_init():
-    """تهيئة غير متزامنة (MongoDB + الحالة) -- تُستدعى من setup_hook"""
+    """تهيئة غير متزامنة (MongoDB + الحالة)"""
+    # ← DEBUG: نشوف حالة MONGO_URI
+    log.info("=== DEBUG MONGO ===")
+    log.info("MONGO_URI موجود؟ %s", "نعم" if config.MONGO_URI else "لا")
+    log.info("طوله: %d", len(config.MONGO_URI) if config.MONGO_URI else 0)
+    log.info("MONGO_ENABLED = %s", config.MONGO_ENABLED)
+    log.info("أول 20 حرف: %s", config.MONGO_URI[:20] if config.MONGO_URI else "-")
+    log.info("==================")
+
     await init_mongodb()
     await load_all_state_async()
     load_extras_module()
