@@ -2170,8 +2170,7 @@ class TicketButtonView(View):
         embed.set_footer(text="صاحب التذكرة: " + str(interaction.user) + " (" + str(interaction.user.id) + ")")
 
         await ch.send(content=interaction.user.mention, embed=embed, view=CloseTicketButton())
-        await interaction.response.send_message("تم فتح تذكرتك: " + ch.mention, ephemeral=True)
-# ═══════════════════════════════════════════════════════════════
+        await interaction.response.send_message("تم فتح تذكرتك: " + ch.mention, ephemeral=True)# ═══════════════════════════════════════════════════════════════
 # ⚙️ القسم 18: الأوامر
 # ═══════════════════════════════════════════════════════════════
 
@@ -2738,7 +2737,7 @@ async def send_apply_panel(interaction: discord.Interaction):
         async for msg in ch.history(limit=50):
             if msg.author == bot.user and msg.embeds:
                 for emb in msg.embeds:
-                    if emb.title and "التقديم لفريق" in emb.title:
+                    if emb.title and "التقديم للسيرفر" in emb.title:
                         try:
                             await msg.delete()
                             deleted += 1
@@ -2750,7 +2749,7 @@ async def send_apply_panel(interaction: discord.Interaction):
 
     # أرسل الجديد
     embed = discord.Embed(
-        title="التقديم لفريق الإدارة",
+        title="التقديم للسيرفر",
         description="اضغط على الزر أدناه لتعبئة استمارة التقديم.",
         color=discord.Color.purple(),
     )
