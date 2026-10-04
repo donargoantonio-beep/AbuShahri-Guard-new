@@ -2668,26 +2668,96 @@ async def voice_cmd(interaction: discord.Interaction, voice_channel: discord.Voi
         await interaction.followup.send("فشل الاتصال: " + str(e), ephemeral=True)
 
 
-@bot.tree.command(name="بانل_التذاكر", description="إرسال بانل التذاكر")
+@bot.tree.command(name="بانل_التذاكر", description="إرسال بانل التذاكر في رومه المخصص")
 async def send_ticket_panel(interaction: discord.Interaction):
     if not await require_control(interaction):
         return
-    embed = discord.Embed(title="مركز الدعم الفني",
-                          description="اضغط على الزر أدناه لفتح تذكرة.",
-                          color=discord.Color.green())
-    await interaction.channel.send(embed=embed, view=TicketButtonView())
-    await interaction.response.send_message("تم إرسال بانل التذاكر.", ephemeral=True)
+
+    ch = get_ch_ticket_panel(interaction.guild)
+    if not ch:
+        await interaction.response.send_message(
+            "لم أجد روم بانل التذاكر. أضف آيديه في config.py",
+            ephemeral=True
+        )
+        return
+
+    await interaction.response.defer(ephemeral=True)
+
+    # احذف البانلات القديمة
+    deleted = 0
+    try:
+        async for msg in ch.history(limit=50):
+            if msg.author == bot.user and msg.embeds:
+                for emb in msg.embeds:
+                    if emb.title and "مركز الدعم" in emb.title:
+                        try:
+                            await msg.delete()
+                            deleted += 1
+                        except Exception:
+                            pass
+                        break
+    except Exception as e:
+        log.warning("فشل حذف البانلات القديمة: %s", e)
+
+    # أرسل الجديد
+    embed = discord.Embed(
+        title="مركز الدعم الفني",
+        description="اضغط على الزر أدناه لفتح تذكرة خاصة للتواصل مع الإدارة.",
+        color=discord.Color.green(),
+    )
+    await ch.send(embed=embed, view=TicketButtonView())
+
+    await interaction.followup.send(
+        "تم إرسال البانل في " + ch.mention
+        + (" (حذفت " + str(deleted) + " نسخة قديمة)" if deleted else ""),
+        ephemeral=True
+    )
 
 
-@bot.tree.command(name="بانل_التقديم", description="إرسال بانل التقديم")
+@bot.tree.command(name="بانل_التقديم", description="إرسال بانل التقديم في رومه المخصص")
 async def send_apply_panel(interaction: discord.Interaction):
     if not await require_control(interaction):
         return
-    embed = discord.Embed(title="التقديم لفريق الإدارة",
-                          description="اضغط على الزر أدناه لتعبئة الاستمارة.",
-                          color=discord.Color.purple())
-    await interaction.channel.send(embed=embed, view=ApplicationButtonView())
-    await interaction.response.send_message("تم إرسال بانل التقديم.", ephemeral=True)
+
+    ch = get_ch_apply_panel(interaction.guild)
+    if not ch:
+        await interaction.response.send_message(
+            "لم أجد روم بانل التقديم. أضف آيديه في config.py",
+            ephemeral=True
+        )
+        return
+
+    await interaction.response.defer(ephemeral=True)
+
+    # احذف البانلات القديمة
+    deleted = 0
+    try:
+        async for msg in ch.history(limit=50):
+            if msg.author == bot.user and msg.embeds:
+                for emb in msg.embeds:
+                    if emb.title and "التقديم لفريق" in emb.title:
+                        try:
+                            await msg.delete()
+                            deleted += 1
+                        except Exception:
+                            pass
+                        break
+    except Exception as e:
+        log.warning("فشل حذف البانلات القديمة: %s", e)
+
+    # أرسل الجديد
+    embed = discord.Embed(
+        title="التقديم لفريق الإدارة",
+        description="اضغط على الزر أدناه لتعبئة استمارة التقديم.",
+        color=discord.Color.purple(),
+    )
+    await ch.send(embed=embed, view=ApplicationButtonView())
+
+    await interaction.followup.send(
+        "تم إرسال البانل في " + ch.mention
+        + (" (حذفت " + str(deleted) + " نسخة قديمة)" if deleted else ""),
+        ephemeral=True
+    )
 
 
 @bot.tree.command(name="مسح", description="حذف رسائل")
