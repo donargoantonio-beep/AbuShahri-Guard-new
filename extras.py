@@ -1021,6 +1021,16 @@ def setup_message_handler(bot: commands.Bot):
                 await old_handler(message)
             return
 
+        # ✅ تجاهل الصور/الملصقات الفارغة (بدون نص)
+        has_media = bool(message.attachments or message.stickers)
+        has_text = bool((message.content or "").strip())
+
+        if has_media and not has_text:
+            # صورة/ملصق فقط -> تجاهل كلي
+            if old_handler:
+                await old_handler(message)
+            return
+
         is_exempted = SHARED.get("is_exempted")
         if is_exempted and is_exempted(message.author):
             if old_handler:
@@ -1091,6 +1101,13 @@ def setup_message_handler(bot: commands.Bot):
 
         # ---------- Auto-Mod ----------
         if config.AUTOMOD_ENABLED:
+            # ✅ تجاهل الصور/الملصقات إذا ما كان فيه نص
+            # (نفحص النص دائماً — حتى لو فيه صورة)
+            if not has_text:
+                if old_handler:
+                    await old_handler(message)
+                return
+
             result = automod_check(message)
             if result:
                 try:
