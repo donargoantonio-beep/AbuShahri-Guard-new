@@ -1357,12 +1357,10 @@ async def on_guild_role_delete(role: discord.Role):
         guild, discord.AuditLogAction.role_delete, role.id
     )
 
-    # لو المالك أو النائب أو محمي -> لا استرجاع، لا عقوبة
     if executor and (executor.id == bot.user.id or is_exempted(executor)):
         log.info("حذف رتبة بواسطة مستثنى (%s) -- تم التجاهل", executor)
         return
 
-    # فقط لو شخص غير مستثنى
     await restore_role_from_cache(guild, role.id)
 
     log_ch = get_ch_log_roles(guild)
@@ -1521,19 +1519,49 @@ async def on_member_ban(guild: discord.Guild, user: discord.User):
     if executor and (executor.id == bot.user.id or is_exempted(executor)):
         return
 
-    if executor:
-        async def unban_user():
-            try:
-                await guild.unban(user, reason="Anti-Nuke: إلغاء بان تخريبي")
-                log.info("تم فك البان عن %s", user)
-            except Exception as e:
-                log.warning("فشل فك البان: %s", e)
+    if not executor:
+        return
 
-        await handle_nuke_event(
-            guild, executor, "ban",
-            str(user) + " (" + str(user.id) + ")",
-            restore_func=unban_user,
+    # ✅ لو الهدف محمي -> عقوبة فورية
+    target_is_protected = (
+        user.id == config.BOT_OWNER_ID
+        or user.id in deputy_user_ids
+        or user.id in protected_users_list
+        or user.id == guild.owner_id
+    )
+
+    async def unban_user():
+        try:
+            await guild.unban(user, reason="Anti-Nuke: إلغاء بان تخريبي")
+            log.info("تم فك البان عن %s", user)
+        except Exception as e:
+            log.warning("فشل فك البان: %s", e)
+
+    if target_is_protected:
+        await unban_user()
+
+        ok, msg = await apply_jail(
+            guild, executor,
+            "حظر عضو محمي: " + str(user)
         )
+
+        await send_nuke_log(
+            guild,
+            "🛡️ حظر عضو محمي",
+            discord.Color.dark_red(),
+            {
+                "العضو المحمي": str(user) + " (" + str(user.id) + ")",
+                "المخالف": str(executor) + " (" + str(executor.id) + ")",
+                "العقوبة": msg,
+            },
+        )
+        return
+
+    await handle_nuke_event(
+        guild, executor, "ban",
+        str(user) + " (" + str(user.id) + ")",
+        restore_func=unban_user,
+    )
 
 
 @bot.event
@@ -1561,6 +1589,40 @@ async def on_member_remove(member: discord.Member):
         if executor.id == bot.user.id or is_exempted(executor):
             return
 
+        # ✅ لو الهدف محمي -> عقوبة فورية
+        target_is_protected = (
+            member.id == config.BOT_OWNER_ID
+            or member.id in deputy_user_ids
+            or member.id in protected_users_list
+            or member.id == guild.owner_id
+        )
+
+        if target_is_protected:
+            try:
+                await member.send(
+                    "⚠️ تم طردك من **" + guild.name + "** بشكل تخريبي.\n"
+                    "البوت عاقب المسؤول عن ذلك."
+                )
+            except Exception:
+                pass
+
+            ok, msg = await apply_jail(
+                guild, executor,
+                "طرد عضو محمي: " + str(member)
+            )
+
+            await send_nuke_log(
+                guild,
+                "🛡️ طرد عضو محمي",
+                discord.Color.dark_red(),
+                {
+                    "العضو المحمي": str(member) + " (" + str(member.id) + ")",
+                    "المخالف": str(executor) + " (" + str(executor.id) + ")",
+                    "العقوبة": msg,
+                },
+            )
+            return
+
         async def notify_kicked():
             try:
                 await member.send(
@@ -1577,6 +1639,7 @@ async def on_member_remove(member: discord.Member):
         )
         return
 
+    # مغادرة عادية
     log_ch = get_ch_log_join_leave(guild)
     if log_ch:
         embed = discord.Embed(
@@ -1661,7 +1724,6 @@ async def on_audit_log_entry_create(entry: discord.AuditLogEntry):
             "في " + str(entry.target),
             restore_func=del_webhook,
         )
-
 
 # ═══════════════════════════════════════════════════════════════
 # 🏰 القسم 14: حماية السيرفر (اسم/أيقونة/بانر)
@@ -1754,7 +1816,7 @@ async def on_guild_update(before: discord.Guild, after: discord.Guild):
                     discord.Color.green(),
                     {"بواسطة": executor.mention},
                 )
-                # ═══════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════
 # 👋 القسم 15: الأحداث العامة (join/leave/update)
 # ═══════════════════════════════════════════════════════════════
 
@@ -1816,6 +1878,96 @@ async def on_member_join(member: discord.Member):
 
 @bot.event
 async def on_member_update(before: discord.Member, after: discord.Member):
+    """عند تحديث بيانات عضو (رتب / لقب / تايم آوت)"""
+
+    # ═══════════════════════════════════════════════════════════════
+    # 🛡️ حماية الأعضاء المحميين - كشف سحب الرتب
+    # ═══════════════════════════════════════════════════════════════
+    if before.roles != after.roles:
+        if is_exempted(after) and after.id != bot.user.id:
+            removed = [r for r in before.roles if r not in after.roles]
+
+            # تجاهل @everyone ورتبة محجور
+            jail_role = get_role_jail(after.guild)
+            meaningful_removed = [
+                r for r in removed
+                if r != after.guild.default_role and r != jail_role
+            ]
+
+            if meaningful_removed:
+                await asyncio.sleep(0.5)
+                executor = await get_audit_executor(
+                    after.guild, discord.AuditLogAction.member_role_update, after.id
+                )
+
+                if executor and not is_exempted(executor) and executor.id != bot.user.id:
+                    # 1. استرجع الرتب المزالة
+                    try:
+                        await after.add_roles(
+                            *meaningful_removed,
+                            reason="حماية: استرجاع رتب عضو محمي"
+                        )
+                    except Exception as e:
+                        log.warning("فشل استرجاع الرتب: %s", e)
+
+                    # 2. عاقب المنفذ
+                    ok, msg = await apply_jail(
+                        after.guild, executor,
+                        "محاولة سحب رتب من عضو محمي: " + str(after)
+                    )
+
+                    # 3. لوق
+                    await send_nuke_log(
+                        after.guild,
+                        "🛡️ محاولة سحب رتب من عضو محمي",
+                        discord.Color.red(),
+                        {
+                            "العضو المحمي": str(after) + " (" + str(after.id) + ")",
+                            "المخالف": str(executor) + " (" + str(executor.id) + ")",
+                            "الرتب المسحوبة": ", ".join(r.name for r in meaningful_removed),
+                            "العقوبة": msg,
+                        },
+                    )
+
+    # ═══════════════════════════════════════════════════════════════
+    # 🛡️ حماية الأعضاء المحميين - كشف التايم آوت
+    # ═══════════════════════════════════════════════════════════════
+    if before.timed_out_until != after.timed_out_until:
+        if is_exempted(after) and after.timed_out_until is not None:
+            if after.timed_out_until > discord.utils.utcnow():
+                await asyncio.sleep(0.5)
+                executor = await get_audit_executor(
+                    after.guild, discord.AuditLogAction.member_update, after.id
+                )
+
+                if executor and not is_exempted(executor) and executor.id != bot.user.id:
+                    # 1. أزل التايم آوت
+                    try:
+                        await after.timeout(None, reason="حماية: إزالة تايم آوت من عضو محمي")
+                    except Exception as e:
+                        log.warning("فشل إزالة التايم آوت: %s", e)
+
+                    # 2. عاقب المنفذ
+                    ok, msg = await apply_jail(
+                        after.guild, executor,
+                        "محاولة تايم آوت لعضو محمي: " + str(after)
+                    )
+
+                    # 3. لوق
+                    await send_nuke_log(
+                        after.guild,
+                        "🛡️ محاولة تايم آوت لعضو محمي",
+                        discord.Color.red(),
+                        {
+                            "العضو المحمي": str(after) + " (" + str(after.id) + ")",
+                            "المخالف": str(executor) + " (" + str(executor.id) + ")",
+                            "العقوبة": msg,
+                        },
+                    )
+
+    # ═══════════════════════════════════════════════════════════════
+    # لوق تحديث الرتب (عادي)
+    # ═══════════════════════════════════════════════════════════════
     if before.roles != after.roles:
         log_ch = get_ch_log_roles(after.guild)
         if log_ch:
@@ -1837,6 +1989,7 @@ async def on_member_update(before: discord.Member, after: discord.Member):
             except Exception:
                 pass
 
+    # لوق تغيير اللقب
     if before.nick != after.nick:
         log_ch = get_ch_log_nickname(after.guild)
         if log_ch:
@@ -1848,61 +2001,34 @@ async def on_member_update(before: discord.Member, after: discord.Member):
             try:
                 await log_ch.send(embed=embed)
             except Exception:
-                pass
-
-
-@bot.event
-async def on_message_delete(message: discord.Message):
-    if message.author.bot or not message.guild:
-        return
-    log_ch = get_ch_log_delete(message.guild)
-    if not log_ch:
-        return
-    embed = discord.Embed(title="حذف رسالة", color=discord.Color.dark_red(),
-                          timestamp=discord.utils.utcnow())
-    embed.add_field(name="صاحب الرسالة", value=message.author.mention, inline=True)
-    embed.add_field(name="الروم", value=message.channel.mention, inline=True)
-    embed.add_field(name="المحتوى",
-                    value=(message.content or "(وسائط)")[:1000],
-                    inline=False)
-    try:
-        await log_ch.send(embed=embed)
-    except Exception:
-        pass
-
-
-# ═══════════════════════════════════════════════════════════════
+                pass# ═══════════════════════════════════════════════════════════════
 # 💬 القسم 16: كشف المخالفات + on_message
 # ═══════════════════════════════════════════════════════════════
 
 def detect_violation(message: discord.Message):
+    """يفحص الرسالة ويرجع نوع المخالفة أو None"""
+
     raw = message.content or ""
 
+    # ✅ تجاهل الرسائل الفارغة أو اللي فيها صور/ملصقات فقط (بدون نص)
+    if not raw.strip():
+        return None
+
+    # 1. منشن الجميع
     if message.mention_everyone:
         return "منشن الجميع (@everyone / @here)"
 
+    # 2. كلمات محظورة (حتى لو معها صورة)
     _, cleaned, collapsed = normalize_text(raw)
     if BAD_WORDS_RE.search(cleaned) or BAD_WORDS_RE.search(collapsed):
         return "السب والشتم / ألفاظ نابية"
 
-    if URL_REGEX.search(raw):
+    # 3. روابط (نتجاهل روابط المرفقات نفسها)
+    url_check_text = raw
+    for att in message.attachments:
+        url_check_text = url_check_text.replace(att.url, "")
+    if URL_REGEX.search(url_check_text):
         return "إرسال روابط أو دعوات سيرفرات"
-
-    user_id = message.author.id
-    now = time.time()
-    entry = SPAM_TRACKER.get(user_id)
-    if entry:
-        last_text, last_time, count = entry
-        if raw == last_text and (now - last_time) < 3:
-            count += 1
-            if count >= 2:
-                SPAM_TRACKER[user_id] = (raw, now, count)
-                return "السبام وتكرار الرسائل"
-            SPAM_TRACKER[user_id] = (raw, now, count)
-        else:
-            SPAM_TRACKER[user_id] = (raw, now, 1)
-    else:
-        SPAM_TRACKER[user_id] = (raw, now, 1)
 
     return None
 
@@ -1919,7 +2045,6 @@ async def on_message(message: discord.Message):
     if is_exempted(message.author):
         return
 
-    cleanup_spam_tracker()
     violation = detect_violation(message)
     if not violation:
         return
@@ -1987,36 +2112,6 @@ async def on_message(message: discord.Message):
             await admin_ch.send(embed=embed)
         except Exception:
             pass
-
-
-@bot.event
-async def on_voice_state_update(member: discord.Member,
-                                before: discord.VoiceState,
-                                after: discord.VoiceState):
-    jail_role = get_role_jail(member.guild)
-    if jail_role and jail_role in member.roles and after.channel is not None:
-        try:
-            await member.move_to(None)
-        except Exception:
-            pass
-        return
-
-    if VOICE_CHANNEL_ID == 0 or member.id != bot.user.id:
-        return
-    if before.channel and before.channel.id == VOICE_CHANNEL_ID:
-        if after.channel is None or after.channel.id != VOICE_CHANNEL_ID:
-            await asyncio.sleep(2)
-            channel = member.guild.get_channel(VOICE_CHANNEL_ID)
-            if isinstance(channel, discord.VoiceChannel):
-                try:
-                    if member.guild.me.voice:
-                        try:
-                            await member.guild.me.voice.disconnect()
-                        except Exception:
-                            pass
-                    await channel.connect()
-                except Exception as e:
-                    log.warning("فشل إعادة الاتصال الصوتي: %s", e)
 
 
 # ═══════════════════════════════════════════════════════════════
