@@ -25,6 +25,46 @@ SHARED: dict = {}
 # 🎨 توليد الأسماء بالـ AI (Groq)
 # ═══════════════════════════════════════════════════════════════
 
+# قائمة الموديلات (نجرب واحد واحد حتى ينجح)
+_GROQ_MODELS = [
+    "llama-3.1-8b-instant",
+    "llama3-8b-8192",
+    "llama3-70b-8192",
+    "gemma2-9b-it",
+    "mixtral-8x7b-32768",
+]
+
+
+async def _call_groq(session, model_name, prompt):
+    """طلب واحد لـ Groq بموديل معين"""
+    headers = {
+        "Authorization": "Bearer " + config.GROQ_API_KEY,
+        "Content-Type": "application/json",
+    }
+    payload = {
+        "model": model_name,
+        "messages": [
+            {"role": "system", "content": "You output only usernames, one per line."},
+            {"role": "user", "content": prompt},
+        ],
+        "temperature": 0.9,
+        "max_tokens": 1024,
+    }
+
+    async with session.post(
+        "https://api.groq.com/openai/v1/chat/completions",
+        headers=headers,
+        json=payload,
+        timeout=aiohttp.ClientTimeout(total=30),
+    ) as resp:
+        if resp.status != 200:
+            text = await resp.text()
+            return None, resp.status, text[:300]
+
+        data = await resp.json()
+        return data["choices"][0]["message"]["content"], 200, None
+
+
 async def generate_usernames_with_ai(description: str,
                                       count: int = 10,
                                       max_length: int = 5) -> list:
@@ -42,36 +82,28 @@ async def generate_usernames_with_ai(description: str,
         "Return ONLY the usernames, one per line, nothing else."
     )
 
-    headers = {
-        "Authorization": "Bearer " + config.GROQ_API_KEY,
-        "Content-Type": "application/json",
-    }
-
-    payload = {
-        "model": "llama-3.3-70b-versatile",
-        "messages": [
-            {"role": "system", "content": "You output only usernames, one per line."},
-            {"role": "user", "content": prompt},
-        ],
-        "temperature": 0.9,
-        "max_tokens": 1024,
-    }
+    text = None
 
     try:
         async with aiohttp.ClientSession() as session:
-            async with session.post(
-                "https://api.groq.com/openai/v1/chat/completions",
-                headers=headers,
-                json=payload,
-                timeout=aiohttp.ClientTimeout(total=30),
-            ) as resp:
-                if resp.status != 200:
-                    text = await resp.text()
-                    log.error("Groq API error %d: %s", resp.status, text[:300])
-                    return []
+            for model_name in _GROQ_MODELS:
+                try:
+                    result, status, error = await _call_groq(session, model_name, prompt)
 
-                data = await resp.json()
-                text = data["choices"][0]["message"]["content"]
+                    if status == 200 and result:
+                        log.info("✅ نجح الموديل: %s", model_name)
+                        text = result
+                        break
+                    else:
+                        log.warning("فشل %s (status %d): %s",
+                                    model_name, status, error)
+                except Exception as e:
+                    log.warning("خطأ في %s: %s", model_name, str(e)[:100])
+                    continue
+
+        if not text:
+            log.error("كل الموديلات فشلت")
+            return []
 
         names = []
         for line in text.split("\n"):
@@ -99,9 +131,9 @@ async def _check_github(session, username):
         async with session.get(url, headers=headers,
                                 timeout=aiohttp.ClientTimeout(total=10)) as resp:
             if resp.status == 200:
-                return False  # محجوز
+                return False
             elif resp.status == 404:
-                return True   # متاح
+                return True
             return None
     except Exception:
         return None
@@ -117,8 +149,8 @@ async def _check_reddit(session, username):
             if resp.status == 200:
                 data = await resp.json()
                 if data.get("data", {}).get("name"):
-                    return False  # محجوز
-                return True       # متاح
+                    return False
+                return True
             elif resp.status == 404:
                 return True
             return None
@@ -133,7 +165,7 @@ async def _check_pinterest(session, username):
         async with session.get(url, timeout=aiohttp.ClientTimeout(total=10),
                                 allow_redirects=True) as resp:
             if resp.status == 200:
-                return False  # محجوز
+                return False
             elif resp.status == 404:
                 return True
             return None
@@ -335,9 +367,3 @@ def load_usernames(bot, shared: dict):
 
     register_command(bot)
     log.info("✅ تم تحميل usernames.py")
-
-
-# ═══════════════════════════════════════════════════════════════
-# 📌 ملاحظة: ما نستخدم مكتبات جديدة
-# aiohttp موجودة تلقائياً مع discord.py
-# ═══════════════════════════════════════════════════════════════
