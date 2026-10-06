@@ -379,15 +379,3 @@ PANEL_AUTO_REFRESH_MINUTES = 30  # 30 دقيقة
 #   120  = كل ساعتين
 #   360  = كل 6 ساعات
 #   1440 = كل يوم
-
-
-
-
-
-# ═══════════════════════════════════════════════════════════════
-# اكتشاف اليوزرات
-# ═══════════════════════════════════════════════════════════════
-USERNAME_FINDER_ENABLED = True
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
-USERNAME_FINDER_PLATFORMS = ["Instagram", "Twitter", "Snapchat"]
-USERNAME_FINDER_CHANNEL_ID = 1557009200985411655
