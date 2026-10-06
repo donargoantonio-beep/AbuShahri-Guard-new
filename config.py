@@ -379,3 +379,13 @@ PANEL_AUTO_REFRESH_MINUTES = 30  # 30 دقيقة
 #   120  = كل ساعتين
 #   360  = كل 6 ساعات
 #   1440 = كل يوم
+
+
+
+# ═══════════════════════════════════════════════════════════════
+# 🔎القسم18: اكتشاف اليوزرات
+# ═══════════════════════════════════════════════════════════════
+USERNAME_FINDER_ENABLED = True
+GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
+USERNAME_FINDER_PLATFORMS = ["GitHub", "Reddit"]
+USERNAME_FINDER_CHANNEL_ID = 1557009200985411655
