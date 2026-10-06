@@ -4,8 +4,8 @@
 """
 ميزة إضافية مستقلة:
 - Groq AI لتوليد الأسماء
-- فحص مباشر عبر HTTP (GitHub, Reddit)
-- تعمل فقط في روم محدد
+- فحص مباشر عبر HTTP (GitHub, Reddit, Instagram, TikTok, Snapchat, Telegram)
+- تعرض المتاح فقط
 """
 import asyncio
 import logging
@@ -25,8 +25,6 @@ SHARED: dict = {}
 # 🎨 توليد الأسماء بالـ AI (Groq)
 # ═══════════════════════════════════════════════════════════════
 
-# قائمة الموديلات (نجرب واحد واحد حتى ينجح)
-# ⚠️ الموديلات القديمة (llama-3.x, gemma2, mixtral) تم إيقافها من Groq
 _GROQ_MODELS = [
     "openai/gpt-oss-120b",
     "openai/gpt-oss-20b",
@@ -119,11 +117,11 @@ async def generate_usernames_with_ai(description: str,
 
 
 # ═══════════════════════════════════════════════════════════════
-# 🔍 فحص التوفر عبر HTTP مباشر
+# 🔍 فحص التوفر عبر منصات متعددة
 # ═══════════════════════════════════════════════════════════════
 
 async def _check_github(session, username):
-    """فحص GitHub"""
+    """فحص GitHub — يرجع True (متاح) / False (محجوز) / None (خطأ)"""
     try:
         url = "https://api.github.com/users/" + username
         headers = {"User-Agent": "Discord-Bot"}
@@ -142,16 +140,127 @@ async def _check_reddit(session, username):
     """فحص Reddit"""
     try:
         url = "https://www.reddit.com/user/" + username + "/about.json"
-        headers = {"User-Agent": "Discord-Bot/1.0"}
+        headers = {"User-Agent": "Mozilla/5.0 DiscordBot/1.0"}
         async with session.get(url, headers=headers,
                                 timeout=aiohttp.ClientTimeout(total=10)) as resp:
             if resp.status == 200:
-                data = await resp.json()
+                try:
+                    data = await resp.json()
+                except Exception:
+                    return None
+                # لو فيه error -> متاح
+                if "error" in data or data.get("error"):
+                    return True
+                # لو فيه اسم -> محجوز
                 if data.get("data", {}).get("name"):
                     return False
                 return True
             elif resp.status == 404:
                 return True
+            return None
+    except Exception:
+        return None
+
+
+async def _check_instagram(session, username):
+    """فحص Instagram"""
+    try:
+        url = "https://www.instagram.com/" + username + "/"
+        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+        async with session.get(url, headers=headers,
+                                timeout=aiohttp.ClientTimeout(total=10),
+                                allow_redirects=False) as resp:
+            if resp.status == 404:
+                return True
+            elif resp.status == 200:
+                return False
+            elif resp.status in (301, 302):
+                # إعادة توجيه لصفحة الدخول = غير موجود
+                return True
+            return None
+    except Exception:
+        return None
+
+
+async def _check_tiktok(session, username):
+    """فحص TikTok"""
+    try:
+        url = "https://www.tiktok.com/@" + username
+        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+        async with session.get(url, headers=headers,
+                                timeout=aiohttp.ClientTimeout(total=10),
+                                allow_redirects=True) as resp:
+            if resp.status == 404:
+                return True
+            elif resp.status == 200:
+                try:
+                    text = await resp.text()
+                except Exception:
+                    return None
+                # لو فيه رسائل "غير موجود"
+                not_found_markers = [
+                    "Couldn't find this account",
+                    "Couldn't find this user",
+                    "تعذر العثور على هذا الحساب",
+                    "找不到此帐号",
+                ]
+                for marker in not_found_markers:
+                    if marker in text:
+                        return True
+                return False
+            return None
+    except Exception:
+        return None
+
+
+async def _check_snapchat(session, username):
+    """فحص Snapchat"""
+    try:
+        url = "https://www.snapchat.com/add/" + username
+        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+        async with session.get(url, headers=headers,
+                                timeout=aiohttp.ClientTimeout(total=10),
+                                allow_redirects=True) as resp:
+            if resp.status == 404:
+                return True
+            elif resp.status == 200:
+                try:
+                    text = await resp.text()
+                except Exception:
+                    return None
+                not_found_markers = [
+                    "This Snapcode doesn't exist",
+                    "Sorry, we couldn't find",
+                ]
+                for marker in not_found_markers:
+                    if marker in text:
+                        return True
+                return False
+            return None
+    except Exception:
+        return None
+
+
+async def _check_telegram(session, username):
+    """فحص Telegram"""
+    try:
+        url = "https://t.me/" + username
+        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+        async with session.get(url, headers=headers,
+                                timeout=aiohttp.ClientTimeout(total=10),
+                                allow_redirects=True) as resp:
+            if resp.status == 200:
+                try:
+                    text = await resp.text()
+                except Exception:
+                    return None
+                # لو فيه "tgme_page_title" -> موجود
+                if "tgme_page_title" in text:
+                    return False
+                # لو فيه رسالة "username not found"
+                if "If you have Telegram" not in text and "tgme_page" not in text:
+                    return True
+                return None
             return None
     except Exception:
         return None
@@ -172,6 +281,18 @@ async def _check_pinterest(session, username):
         return None
 
 
+# ─── خريطة المنصات ───
+_PLATFORM_CHECKERS = {
+    "GitHub": _check_github,
+    "Reddit": _check_reddit,
+    "Instagram": _check_instagram,
+    "TikTok": _check_tiktok,
+    "Snapchat": _check_snapchat,
+    "Telegram": _check_telegram,
+    "Pinterest": _check_pinterest,
+}
+
+
 async def check_usernames_availability(usernames: list,
                                         platforms: list) -> dict:
     """يفحص توفر الأسماء عبر المنصات"""
@@ -182,17 +303,16 @@ async def check_usernames_availability(usernames: list,
             results[username] = {"available": [], "taken": [], "unknown": []}
 
             for platform in platforms:
-                result = None
-
-                if platform == "GitHub":
-                    result = await _check_github(session, username)
-                elif platform == "Reddit":
-                    result = await _check_reddit(session, username)
-                elif platform == "Pinterest":
-                    result = await _check_pinterest(session, username)
-                else:
+                checker = _PLATFORM_CHECKERS.get(platform)
+                if not checker:
                     results[username]["unknown"].append(platform)
                     continue
+
+                try:
+                    result = await checker(session, username)
+                except Exception as e:
+                    log.warning("خطأ في %s لـ %s: %s", platform, username, str(e)[:100])
+                    result = None
 
                 if result is True:
                     results[username]["available"].append(platform)
@@ -201,9 +321,66 @@ async def check_usernames_availability(usernames: list,
                 else:
                     results[username]["unknown"].append(platform)
 
-                await asyncio.sleep(0.3)
+                await asyncio.sleep(0.2)
 
     return results
+
+
+# ═══════════════════════════════════════════════════════════════
+# 🔄 توليد المتاح فقط (يستبدل المحجوز)
+# ═══════════════════════════════════════════════════════════════
+
+async def generate_available_usernames(description: str,
+                                        count: int,
+                                        max_length: int,
+                                        platforms: list,
+                                        max_rounds: int = 3):
+    """
+    يولّد أسماء ويستبدل المحجوز تلقائياً حتى يصل للعدد المطلوب
+    يرجع قائمة (name, data) للمتاحين فقط
+    """
+    available = []
+    seen = set()
+
+    for round_num in range(max_rounds):
+        needed = count - len(available)
+        if needed <= 0:
+            break
+
+        # نطلب أكثر (× 3) عشان نضمن الوصول للعدد
+        request_count = min(needed * 3, 20)
+
+        log.info("الجولة %d: نولّد %d اسم عشان نكمل %d",
+                 round_num + 1, request_count, needed)
+
+        candidates = await generate_usernames_with_ai(
+            description, count=request_count, max_length=max_length
+        )
+
+        # احذف المكرر
+        candidates = [c for c in candidates if c not in seen]
+        seen.update(candidates)
+
+        if not candidates:
+            log.warning("AI ما رجّع أسماء في الجولة %d", round_num + 1)
+            break
+
+        results = await check_usernames_availability(candidates, platforms)
+
+        # خذ المتاح فقط
+        for name, data in results.items():
+            # نتجاهل اللي عنده أي منصة "محجوز"
+            if data["taken"]:
+                continue
+
+            # لازم يكون متاح على منصة واحدة على الأقل (مو كلها unknown)
+            if not data["available"]:
+                continue
+
+            if len(available) < count:
+                available.append((name, data))
+
+    return available
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -214,17 +391,17 @@ def register_command(bot):
     """تسجيل أمر /اكتشف_يوزر"""
 
     @bot.tree.command(name="اكتشف_يوزر",
-                      description="يولّد يوزرات قصيرة بالذكاء الاصطناعي ويفحص توفرها")
+                      description="يولّد يوزرات قصيرة متاحة (يستبدل المحجوز تلقائياً)")
     @app_commands.describe(
         وصف="وصف اختياري",
         حرف="حرف محدد a-z",
-        عدد="عدد الأسماء (1-20، افتراضي: 10)",
+        عدد="عدد الأسماء المتاحة المطلوبة (1-20، افتراضي: 5)",
         طول="الحد الأقصى لطول الاسم (2-5، افتراضي: 5)",
     )
     async def discover_username_cmd(interaction: discord.Interaction,
                                      وصف: str = "",
                                      حرف: str = "",
-                                     عدد: int = 10,
+                                     عدد: int = 5,
                                      طول: int = 5):
 
         if not getattr(config, "USERNAME_FINDER_ENABLED", True):
@@ -267,80 +444,69 @@ def register_command(bot):
         if not وصف.strip():
             وصف = "diverse short English words"
 
-        candidates = await generate_usernames_with_ai(
-            وصف, count=عدد, max_length=طول
+        platforms = getattr(config, "USERNAME_FINDER_PLATFORMS",
+                            ["GitHub", "Reddit", "Instagram", "TikTok", "Snapchat", "Telegram"])
+
+        # ⭐ توليد المتاح فقط
+        available = await generate_available_usernames(
+            وصف, count=عدد, max_length=طول, platforms=platforms
         )
 
-        if not candidates:
+        if not available:
             await interaction.followup.send(
-                "فشل توليد الأسماء. تأكد من `GROQ_API_KEY` في Render."
+                "ما قدرت ألقى أسماء متاحة. جرّب مرة ثانية أو وصف مختلف."
             )
             return
 
-        platforms = getattr(config, "USERNAME_FINDER_PLATFORMS",
-                            ["GitHub", "Reddit"])
-        results = await check_usernames_availability(candidates, platforms)
-
-        def score(n):
-            return len(results.get(n, {}).get("available", []))
-
-        sorted_names = sorted(results.keys(), key=score, reverse=True)
+        title = "🔎 يوزرات متاحة"
+        if letter:
+            title = "🔎 يوزرات متاحة تبدأ بحرف: " + letter.upper()
 
         total = len(platforms)
-        fully_available = sum(
-            1 for n in sorted_names if len(results[n]["available"]) == total
-        )
-
-        title = "🔎 نتائج فحص اليوزرات"
+        desc_parts = [
+            "🎯 **عدد المتاح:** " + str(len(available)),
+            "🌐 **الفحص عبر:** " + ", ".join(platforms),
+        ]
         if letter:
-            title = "🔎 يوزرات تبدأ بحرف: " + letter.upper()
-
-        desc_parts = []
-        if letter:
-            desc_parts.append("🔤 الحرف: `" + letter + "`")
-        desc_parts.append("🎯 تم توليد: " + str(len(candidates)) + " أسماء")
-        desc_parts.append("🌐 الفحص عبر: " + ", ".join(platforms))
-        if fully_available:
-            desc_parts.append("🎉 " + str(fully_available) + " متاحة على كل المنصات!")
+            desc_parts.insert(0, "🔤 **الحرف:** `" + letter + "`")
 
         embed = discord.Embed(
             title=title,
             description="\n".join(desc_parts),
-            color=discord.Color.gold(),
+            color=discord.Color.green(),
             timestamp=discord.utils.utcnow(),
         )
 
-        for name in sorted_names[:20]:
-            data = results[name]
+        for name, data in available[:20]:
             avail = data["available"]
-            taken = data["taken"]
+            unknown = data["unknown"]
 
             if len(avail) == total:
                 icon = "🌟"
-            elif len(avail) >= 2:
+            elif len(avail) >= 3:
                 icon = "✅"
-            elif len(avail) == 1:
-                icon = "🔸"
             else:
-                icon = "❌"
+                icon = "🔸"
 
+            # ✅ كل منصة
             platform_parts = []
             for p in platforms:
                 if p in avail:
                     platform_parts.append("✅ " + p)
-                elif p in taken:
-                    platform_parts.append("❌ " + p)
-                else:
+                elif p in unknown:
                     platform_parts.append("❔ " + p)
+                else:
+                    platform_parts.append("⏭️ " + p)  # تم تخطيها
 
             platform_line = " • ".join(platform_parts)
 
-            if avail:
-                summary = "**متاح على:** " + ", ".join(avail)
-                if taken:
-                    summary += "\n**محجوز على:** " + ", ".join(taken)
+            # التفاصيل
+            if len(avail) == total:
+                summary = "🎉 **متاح على كل المنصات**"
             else:
-                summary = "**محجوز على كل المنصات**"
+                summary = "**متاح على:** " + ", ".join(avail)
+                if unknown:
+                    summary += "\n**غير معروف:** " + ", ".join(unknown)
 
             embed.add_field(
                 name=icon + " `" + name + "`",
@@ -348,7 +514,7 @@ def register_command(bot):
                 inline=False,
             )
 
-        embed.set_footer(text="💡 استخدم حرف: a ليوزرات تبدأ بحرف معين")
+        embed.set_footer(text="💡 كل الأسماء المعروضة متاحة على الأقل في منصة واحدة")
 
         await interaction.followup.send(embed=embed)
 
