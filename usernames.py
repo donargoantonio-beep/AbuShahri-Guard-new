@@ -1,5 +1,5 @@
 # ═══════════════════════════════════════════════════════════════
-# 🔎 usernames.py -- إصدار 7.0 (دفعات متتالية)
+# 🔎 usernames.py -- إصدار 7.1 (TikTok محسّن)
 # ═══════════════════════════════════════════════════════════════
 import asyncio
 import logging
@@ -163,16 +163,55 @@ async def _check_instagram(session, username):
 
 
 async def _check_tiktok(session, username):
+    """فحص TikTok عبر HTML (أدق من oembed)"""
     try:
-        url = ("https://www.tiktok.com/oembed?url="
-               "https://www.tiktok.com/@" + username)
-        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
-        async with session.get(url, headers=headers,
-                                timeout=aiohttp.ClientTimeout(total=_REQUEST_TIMEOUT)) as resp:
-            if resp.status == 200:
-                return False
-            elif resp.status in (400, 404):
+        url = "https://www.tiktok.com/@" + username
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                          "AppleWebKit/537.36 (KHTML, like Gecko) "
+                          "Chrome/120.0.0.0 Safari/537.36",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Accept-Language": "en-US,en;q=0.9",
+        }
+        async with session.get(
+            url, headers=headers,
+            timeout=aiohttp.ClientTimeout(total=8),
+            allow_redirects=True,
+        ) as resp:
+            if resp.status == 404:
                 return True
+
+            if resp.status == 200:
+                try:
+                    text = await resp.text()
+                except Exception:
+                    return None
+
+                # مؤشرات "غير موجود"
+                not_found = [
+                    "Couldn't find this account",
+                    "Couldn't find this user",
+                    "تعذر العثور على هذا الحساب",
+                    "找不到此帐号",
+                    "Video currently unavailable",
+                ]
+                for marker in not_found:
+                    if marker in text:
+                        return True
+
+                # مؤشرات "موجود"
+                exists = [
+                    '"uniqueId":"' + username + '"',
+                    '"nickname":',
+                    'shareMeta',
+                    '"userInfo"',
+                ]
+                for marker in exists:
+                    if marker in text:
+                        return False
+
+                return None
+
             return None
     except Exception:
         return None
@@ -281,7 +320,7 @@ async def check_usernames_batch(session, usernames, platforms):
 
 
 # ═══════════════════════════════════════════════════════════════
-# 🔄 المولّد الرئيسي (يدعم دفعات)
+# 🔄 المولّد الرئيسي (دفعات متتالية)
 # ═══════════════════════════════════════════════════════════════
 
 async def stream_available_usernames(
@@ -292,15 +331,10 @@ async def stream_available_usernames(
     platforms: list,
     on_batch_callback,
 ):
-    """
-    يولّد أسماء متاحة ويستدعي on_batch_callback كل ما جمع batch_size
-    يتوقف عند total_needed
-    """
     delivered = 0
     seen = set()
     start_time = time.time()
 
-    # حد أقصى للجولات (يمنع اللوب اللانهائي)
     max_iterations = 40
     empty_rounds = 0
 
@@ -308,9 +342,7 @@ async def stream_available_usernames(
         if delivered >= total_needed:
             break
 
-        # كم باقي
         still_need = total_needed - delivered
-        # نطلب كمية كافية + هامش للرفض
         request_count = min(max(still_need * 4, 30), 80)
 
         log.info("جولة %d: نحتاج %d، نطلب %d من AI",
@@ -334,13 +366,11 @@ async def stream_available_usernames(
 
         empty_rounds = 0
 
-        # فحص الدفعة
         log.info("نفحص %d اسم...", len(candidates))
 
         async with aiohttp.ClientSession() as session:
             results = await check_usernames_batch(session, candidates, platforms)
 
-        # اجمع المتاح
         batch_buffer = []
 
         for name, data in results.items():
@@ -351,7 +381,6 @@ async def stream_available_usernames(
 
             batch_buffer.append((name, data))
 
-            # لو وصلنا للدفعة — أرسلها
             if len(batch_buffer) >= batch_size:
                 remaining_global = total_needed - delivered
                 to_send = batch_buffer[:batch_size]
@@ -371,7 +400,6 @@ async def stream_available_usernames(
                 if delivered >= total_needed:
                     break
 
-        # أرسل أي بقايا (لو وصلنا للنهاية)
         if batch_buffer and delivered < total_needed:
             remaining_global = total_needed - delivered
             to_send = batch_buffer[:remaining_global]
@@ -483,7 +511,6 @@ def register_command(bot):
             )
             return
 
-        # تحقق من الأرقام
         if عدد < 1 or عدد > 500:
             await interaction.response.send_message(
                 "العدد بين 1 و 500.", ephemeral=True
@@ -502,7 +529,6 @@ def register_command(bot):
             )
             return
 
-        # معالجة الحرف
         letter = حرف.strip().lower()
         if letter:
             if not (len(letter) == 1 and letter.isalpha() and letter.isascii()):
@@ -518,9 +544,8 @@ def register_command(bot):
             وصف = "diverse short English words"
 
         platforms = getattr(config, "USERNAME_FINDER_PLATFORMS",
-                            ["Reddit", "Instagram", "TikTok", "Snapchat", "Telegram"])
+                            ["Reddit", "Instagram", "Snapchat", "Telegram"])
 
-        # رسالة البداية
         estimated_batches = (عدد + كل - 1) // كل
         await interaction.followup.send(
             "🚀 **بدأ البحث**\n"
@@ -531,7 +556,6 @@ def register_command(bot):
             "⏳ **البوت راح يرسل الرسائل تدريجياً...**"
         )
 
-        # callback الإرسال
         async def send_batch(batch, delivered, total, elapsed):
             try:
                 embed = _build_batch_embed(
@@ -542,7 +566,6 @@ def register_command(bot):
             except Exception as e:
                 log.warning("فشل إرسال دفعة: %s", e)
 
-        # ابدأ البحث
         total_delivered = await stream_available_usernames(
             description=وصف,
             total_needed=عدد,
@@ -552,7 +575,6 @@ def register_command(bot):
             on_batch_callback=send_batch,
         )
 
-        # رسالة النهاية
         await interaction.followup.send(
             "✅ **انتهى البحث**\n"
             "📊 **المُسلَّم:** " + str(total_delivered) + " / " + str(عدد) + "\n"
