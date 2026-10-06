@@ -1,10 +1,15 @@
 # ═══════════════════════════════════════════════════════════════
-# 🔎 usernames.py -- نسخة محسّنة بدقة عالية
+# 🔎 usernames.py -- إصدار 3.0
 # ═══════════════════════════════════════════════════════════════
+"""
+ميزة إضافية مستقلة:
+- Groq AI لتوليد الأسماء
+- فحص مباشر عبر HTTP (Reddit, Instagram, TikTok, Snapchat, Telegram)
+- 15 يوزر متاح في كل طلب
+- تعرض المتاح فقط
+"""
 import asyncio
 import logging
-import json
-import re
 
 import aiohttp
 import discord
@@ -39,8 +44,8 @@ async def _call_groq(session, model_name, prompt):
             {"role": "system", "content": "You output only usernames, one per line."},
             {"role": "user", "content": prompt},
         ],
-        "temperature": 0.9,
-        "max_tokens": 1024,
+        "temperature": 0.95,
+        "max_tokens": 2048,
     }
 
     async with session.post(
@@ -58,15 +63,17 @@ async def _call_groq(session, model_name, prompt):
 
 
 async def generate_usernames_with_ai(description: str,
-                                      count: int = 10,
+                                      count: int = 20,
                                       max_length: int = 5) -> list:
+    """يولّد أسماء مستخدمين قصيرة باستخدام Groq API"""
     if not config.GROQ_API_KEY:
         return []
 
     prompt = (
         "Generate " + str(count) + " short English usernames, "
         + str(max_length) + " letters or fewer. "
-        "Use REAL English words, all lowercase, no numbers, no symbols. "
+        "Use REAL English words (nouns, verbs, adjectives), all lowercase, "
+        "no numbers, no symbols, no spaces. "
         "Diverse (not all same theme). "
         "Theme: " + (description or "diverse, memorable words") + ". "
         "Return ONLY the usernames, one per line, nothing else."
@@ -106,27 +113,11 @@ async def generate_usernames_with_ai(description: str,
 
 
 # ═══════════════════════════════════════════════════════════════
-# 🔍 فحوصات دقيقة (True=متاح / False=محجوز / None=خطأ)
+# 🔍 فحوصات المنصات
 # ═══════════════════════════════════════════════════════════════
 
-async def _check_github(session, username):
-    """GitHub — دقيق 100%"""
-    try:
-        url = "https://api.github.com/users/" + username
-        headers = {"User-Agent": "DiscordBot", "Accept": "application/vnd.github+json"}
-        async with session.get(url, headers=headers,
-                                timeout=aiohttp.ClientTimeout(total=10)) as resp:
-            if resp.status == 200:
-                return False
-            elif resp.status == 404:
-                return True
-            return None
-    except Exception:
-        return None
-
-
 async def _check_reddit(session, username):
-    """Reddit — دقيق 100%"""
+    """Reddit — دقيق"""
     try:
         url = "https://www.reddit.com/user/" + username + "/about.json"
         headers = {"User-Agent": "Mozilla/5.0 DiscordBot/1.0"}
@@ -152,7 +143,8 @@ async def _check_reddit(session, username):
 async def _check_instagram(session, username):
     """Instagram — باستخدام API الداخلي"""
     try:
-        url = "https://www.instagram.com/api/v1/users/web_profile_info/?username=" + username
+        url = ("https://www.instagram.com/api/v1/users/web_profile_info/"
+               "?username=" + username)
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
             "X-IG-App-ID": "936619743392459",
@@ -193,7 +185,6 @@ async def _check_tiktok(session, username):
                     data = await resp.json()
                 except Exception:
                     return None
-                # لو ما فيه userInfo = متاح
                 if not data.get("userInfo"):
                     return True
                 user = data.get("userInfo", {}).get("user")
@@ -208,10 +199,8 @@ async def _check_tiktok(session, username):
 async def _check_snapchat(session, username):
     """Snapchat — باستخدام API الاقتراحات"""
     try:
-        url = (
-            "https://accounts.snapchat.com/accounts/get_username_suggestions"
-            "?requested_username=" + username + "&xsrf_token="
-        )
+        url = ("https://accounts.snapchat.com/accounts/get_username_suggestions"
+               "?requested_username=" + username + "&xsrf_token=")
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
             "Accept": "application/json",
@@ -234,7 +223,7 @@ async def _check_snapchat(session, username):
 
 
 async def _check_telegram(session, username):
-    """Telegram — دقيق بالمؤشرات"""
+    """Telegram — بالمؤشرات"""
     try:
         url = "https://t.me/" + username
         headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
@@ -247,25 +236,15 @@ async def _check_telegram(session, username):
                 except Exception:
                     return None
 
-                # مؤشرات "غير موجود"
-                not_found_indicators = [
-                    "If you have Telegram, you can contact",
-                    "tgme_page_icon",
-                    "tgme_page_title",
-                ]
-                # لو الصفحة فاضية من هذي العلامات -> متاح
                 has_title = "tgme_page_title" in text
-                has_username_marker = 'tgme_page_extra' in text
+                has_extra = "tgme_page_extra" in text
 
-                # لو فيه عنوان + معلومات -> محجوز
-                if has_title and has_username_marker:
+                if has_title and has_extra:
                     return False
 
-                # لو نص "If you have Telegram" بس -> متاح
                 if "If you have Telegram, you can contact" in text and not has_title:
                     return True
 
-                # ما نعرف
                 return None
             elif resp.status == 404:
                 return True
@@ -274,19 +253,8 @@ async def _check_telegram(session, username):
         return None
 
 
-async def _check_pinterest(session, username):
-    """Pinterest"""
-    try:
-        url = "https://www.pinterest.com/resource/UserResource/get/?data="
-        # Pinterest يحتاج طريقة معقدة — نتخطاه
-        return None
-    except Exception:
-        return None
-
-
-# ─── خريطة المنصات ───
+# ─── خريطة المنصات (بدون GitHub) ───
 _PLATFORM_CHECKERS = {
-    "GitHub": _check_github,
     "Reddit": _check_reddit,
     "Instagram": _check_instagram,
     "TikTok": _check_tiktok,
@@ -325,28 +293,37 @@ async def check_username_all_platforms(session, username, platforms):
 
 async def check_usernames_availability(usernames: list,
                                         platforms: list) -> dict:
-    """يفحص قائمة أسماء على المنصات"""
+    """يفحص قائمة أسماء على المنصات (بالتوازي)"""
     results = {}
 
     async with aiohttp.ClientSession() as session:
-        for username in usernames:
-            data = await check_username_all_platforms(session, username, platforms)
+        # نفحص عدة أسماء بالتوازي (أسرع)
+        tasks = [
+            check_username_all_platforms(session, u, platforms)
+            for u in usernames
+        ]
+        results_list = await asyncio.gather(*tasks)
+
+        for username, data in zip(usernames, results_list):
             results[username] = data
-            await asyncio.sleep(0.3)
 
     return results
 
 
 # ═══════════════════════════════════════════════════════════════
-# 🔄 توليد المتاح فقط
+# 🔄 توليد المتاح فقط (مع تحسين للوصول لـ 15)
 # ═══════════════════════════════════════════════════════════════
 
 async def generate_available_usernames(description: str,
                                         count: int,
                                         max_length: int,
                                         platforms: list,
-                                        max_rounds: int = 4):
-    """يولّد أسماء متاحة (ليست محجوزة على أي منصة)"""
+                                        max_rounds: int = 6):
+    """
+    يولّد أسماء متاحة (ليست محجوزة على أي منصة)
+    - 6 جولات كحد أقصى للوصول للعدد المطلوب
+    - يطلب عدد كبير من الأسماء في كل جولة
+    """
     available = []
     seen = set()
 
@@ -355,7 +332,8 @@ async def generate_available_usernames(description: str,
         if needed <= 0:
             break
 
-        request_count = min(needed * 4, 20)
+        # نطلب أكثر بكثير لضمان الوصول
+        request_count = min(max(needed * 4, 20), 30)
 
         log.info("الجولة %d: نولّد %d اسم عشان نكمل %d",
                  round_num + 1, request_count, needed)
@@ -368,8 +346,10 @@ async def generate_available_usernames(description: str,
         seen.update(candidates)
 
         if not candidates:
-            break
+            log.warning("AI ما رجّع أسماء")
+            continue
 
+        log.info("نفحص %d اسم...", len(candidates))
         results = await check_usernames_availability(candidates, platforms)
 
         for name, data in results.items():
@@ -383,6 +363,9 @@ async def generate_available_usernames(description: str,
             if len(available) < count:
                 available.append((name, data))
 
+        log.info("بعد الجولة %d: عندنا %d متاح",
+                 round_num + 1, len(available))
+
     return available
 
 
@@ -394,17 +377,17 @@ def register_command(bot):
     """تسجيل أمر /اكتشف_يوزر"""
 
     @bot.tree.command(name="اكتشف_يوزر",
-                      description="يولّد يوزرات متاحة (يستبعد المحجوز على أي منصة)")
+                      description="يولّد 15 يوزر متاح (يستبعد المحجوز على أي منصة)")
     @app_commands.describe(
         وصف="وصف اختياري",
         حرف="حرف محدد a-z",
-        عدد="عدد الأسماء المتاحة (1-15، افتراضي: 5)",
+        عدد="عدد الأسماء المتاحة (1-15، افتراضي: 15)",
         طول="الحد الأقصى لطول الاسم (2-5، افتراضي: 5)",
     )
     async def discover_username_cmd(interaction: discord.Interaction,
                                      وصف: str = "",
                                      حرف: str = "",
-                                     عدد: int = 5,
+                                     عدد: int = 15,
                                      طول: int = 5):
 
         if not getattr(config, "USERNAME_FINDER_ENABLED", True):
@@ -448,7 +431,7 @@ def register_command(bot):
             وصف = "diverse short English words"
 
         platforms = getattr(config, "USERNAME_FINDER_PLATFORMS",
-                            ["GitHub", "Reddit", "Instagram", "TikTok", "Snapchat", "Telegram"])
+                            ["Reddit", "Instagram", "TikTok", "Snapchat", "Telegram"])
 
         available = await generate_available_usernames(
             وصف, count=عدد, max_length=طول, platforms=platforms
@@ -460,16 +443,15 @@ def register_command(bot):
             )
             return
 
-        title = "🔎 يوزرات متاحة — أكيد 100%"
+        title = "🔎 يوزرات متاحة"
         if letter:
             title = "🔎 يوزرات متاحة تبدأ بحرف: " + letter.upper()
 
         embed = discord.Embed(
             title=title,
             description=(
-                "🎯 **العدد:** " + str(len(available)) + "\n"
-                "🌐 **الفحص عبر:** " + ", ".join(platforms) + "\n"
-                "⚠️ **ملاحظة:** Instagram/TikTok/Snapchat/Telegram قد تكون أقل دقة"
+                "🎯 **العدد:** " + str(len(available)) + " من " + str(عدد) + "\n"
+                "🌐 **الفحص عبر:** " + ", ".join(platforms)
             ),
             color=discord.Color.green(),
             timestamp=discord.utils.utcnow(),
@@ -479,34 +461,30 @@ def register_command(bot):
             avail = data["available"]
             unknown = data["unknown"]
 
-            # كل المنصات متاحة
             if len(avail) == len(platforms):
                 icon = "🌟"
-                header = "**متاح على الكل!**"
             elif len(avail) >= 2:
                 icon = "✅"
-                header = "**متاح على:** " + ", ".join(avail)
             else:
                 icon = "🔸"
-                header = "**متاح على:** " + ", ".join(avail)
 
-            # الحالة التفصيلية
-            detail_lines = []
+            # سطر الحالة
+            platform_parts = []
             for p in platforms:
                 if p in avail:
-                    detail_lines.append("✅ " + p)
+                    platform_parts.append("✅ " + p)
                 elif p in unknown:
-                    detail_lines.append("❔ " + p)
+                    platform_parts.append("❔ " + p)
 
-            detail = " • ".join(detail_lines)
+            detail = " • ".join(platform_parts)
 
             embed.add_field(
                 name=icon + " `" + name + "`",
-                value=header + "\n" + detail,
+                value=detail,
                 inline=False,
             )
 
-        embed.set_footer(text="❔ = ما قدرنا نتحقق | ✅ = متاح")
+        embed.set_footer(text="✅ = متاح | ❔ = ما قدرنا نتحقق")
 
         await interaction.followup.send(embed=embed)
 
