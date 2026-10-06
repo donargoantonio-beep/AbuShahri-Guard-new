@@ -382,19 +382,12 @@ PANEL_AUTO_REFRESH_MINUTES = 30  # 30 دقيقة
 
 
 
+
+
 # ═══════════════════════════════════════════════════════════════
-# 🔎 القسم 19: اكتشاف اليوزرات
-# ═════════════════════════════════════════════════ True══════════════
-USERNAME
-_FINDER_ENABLED = True
-
-GEMGINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
-
-USERNAME_FINDER_PLATFORMS = [
-    "Instagram",
-    "Twitter",
-    "Snapchat",
-]
-
-# ⭐ آيدي الروم المخصص
+# اكتشاف اليوزرات
+# ═══════════════════════════════════════════════════════════════
+USERNAME_FINDER_ENABLED = True
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
+USERNAME_FINDER_PLATFORMS = ["Instagram", "Twitter", "Snapchat"]
 USERNAME_FINDER_CHANNEL_ID = 1557009200985411655
