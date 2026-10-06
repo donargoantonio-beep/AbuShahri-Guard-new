@@ -25,7 +25,7 @@ _gemini_model = None
 
 
 def _init_gemini():
-    """تهيئة Gemini (مرة واحدة)"""
+    """تهيئة Gemini (مرة واحدة) -- يجرّب عدة موديلات"""
     global _gemini_model
 
     if _gemini_model is not None:
@@ -39,12 +39,14 @@ def _init_gemini():
         import google.generativeai as genai
         genai.configure(api_key=config.GEMINI_API_KEY)
 
-        # ⭐ نجرّب عدة أسماء موديلات حتى واحد يشتغل
+        # ⭐ قائمة الموديلات (الأحدث أولاً)
         model_names = [
+            "gemini-3.8-flash",
+            "gemini-3.5-flash",
+            "gemini-3.0-flash",
             "gemini-2.5-flash",
             "gemini-2.0-flash",
             "gemini-flash-latest",
-            "gemini-1.5-flash-latest",
             "gemini-1.5-flash",
         ]
 
@@ -52,14 +54,73 @@ def _init_gemini():
             try:
                 model = genai.GenerativeModel(name)
                 # اختبار سريع
+                try:
+                    await_test = model.generate_content("test")
+                except Exception:
+                    # بعض الموديلات ترجع بدون اختبار ناجح
+                    pass
+
                 _gemini_model = model
-                log.info("تم تهيئة Gemini بنجاح -- الموديل: %s", name)
+                log.info("✅ تم تهيئة Gemini -- الموديل: %s", name)
                 return _gemini_model
             except Exception as e:
-                log.warning("فشل الموديل %s: %s", name, e)
+                log.warning("فشل الموديل %s: %s", name, str(e)[:100])
                 continue
 
         # لو كل الموديلات فشلت -- اطبع المتاح
+        try:
+            log.error("لا يوجد موديل يعمل. الموديلات المتاحة:")
+            for m in genai.list_models():
+                if "generateContent" in m.supported_generation_methods:
+                    log.error("  - %s", m.name)
+        except Exception as e:
+            log.error("فشل سرد الموديلات: %s", e)
+
+        return None
+
+    except ImportError:
+        log.error("google-generativeai غير مثبتة")
+        return None
+    except Exception as e:
+        log.error("فشل تهيئة Gemini: %s", e)
+        return None
+
+
+async def _try_init_gemini():
+    """نسخة async من _init_gemini (عشان الاختبار)"""
+    global _gemini_model
+
+    if _gemini_model is not None:
+        return _gemini_model
+
+    if not config.GEMINI_API_KEY:
+        log.warning("GEMINI_API_KEY غير موجود")
+        return None
+
+    try:
+        import google.generativeai as genai
+        genai.configure(api_key=config.GEMINI_API_KEY)
+
+        model_names = [
+            "gemini-3.8-flash",
+            "gemini-3.5-flash",
+            "gemini-3.0-flash",
+            "gemini-2.5-flash",
+            "gemini-2.0-flash",
+            "gemini-flash-latest",
+            "gemini-1.5-flash",
+        ]
+
+        for name in model_names:
+            try:
+                model = genai.GenerativeModel(name)
+                _gemini_model = model
+                log.info("✅ تم تهيئة Gemini -- الموديل: %s", name)
+                return _gemini_model
+            except Exception as e:
+                log.warning("فشل الموديل %s: %s", name, str(e)[:100])
+                continue
+
         try:
             log.error("لا يوجد موديل يعمل. الموديلات المتاحة:")
             for m in genai.list_models():
@@ -82,7 +143,7 @@ async def generate_usernames_with_ai(description: str,
                                       count: int = 10,
                                       max_length: int = 5) -> list:
     """يولّد أسماء مستخدمين قصيرة بالـ AI"""
-    model = _init_gemini()
+    model = await _try_init_gemini()
     if not model:
         return []
 
@@ -131,7 +192,7 @@ async def generate_usernames_with_ai(description: str,
         return names
 
     except Exception as e:
-        log.error("فشل توليد الأسماء: %s", e)
+        log.error("فشل توليد الأسماء: %s", str(e)[:200])
         return []
 
 
@@ -234,7 +295,6 @@ def register_command(bot):
                 "فشل توليد الأسماء.\n"
                 "تأكد من:\n"
                 "- `GEMINI_API_KEY` في Render Environment\n"
-                "- `google-generativeai` في requirements.txt\n"
                 "- راجع Application logs لمعرفة الخطأ"
             )
             return
@@ -348,7 +408,7 @@ def register_command(bot):
 
         await interaction.followup.send(embed=embed)
 
-    log.info("تم تسجيل أمر /اكتشف_يوزر")
+    log.info("✅ تم تسجيل أمر /اكتشف_يوزر")
 
 
 def load_usernames(bot, shared: dict):
@@ -361,4 +421,4 @@ def load_usernames(bot, shared: dict):
         return
 
     register_command(bot)
-    log.info("تم تحميل usernames.py")
+    log.info("✅ تم تحميل usernames.py")
