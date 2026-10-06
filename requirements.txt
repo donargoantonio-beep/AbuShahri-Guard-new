@@ -5,3 +5,5 @@ flask
 Pillow
 motor
 dnspython
+socialscan
+google-generativeai
