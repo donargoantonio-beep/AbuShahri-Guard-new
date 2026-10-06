@@ -391,12 +391,12 @@ GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
 # ⭐ المنصات اللي يفحصها البوت
 # ملاحظة: Discord و Twitter/X ما يدعمون الفحص التلقائي
 USERNAME_FINDER_PLATFORMS = [
-    "GitHub",
     "Reddit",
     "Instagram",
     "TikTok",
     "Snapchat",
     "Telegram",
+]
 ]
 
 USERNAME_FINDER_CHANNEL_ID = 1557009200985411655
