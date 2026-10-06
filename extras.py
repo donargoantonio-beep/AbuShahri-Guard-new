@@ -1323,3 +1323,27 @@ def load_extras(bot: commands.Bot, shared: dict):
 # البوت يحذف البانلات القديمة ويرسل جديدة كل X دقيقة
 PANEL_AUTO_REFRESH = True
 PANEL_AUTO_REFRESH_MINUTES = 60  # كل ساعة (تقدر تغيره)
+
+
+
+# ═══════════════════════════════════════════════════════════════
+# 🔎 القسم 19: اكتشاف اليوزرات
+# ═══════════════════════════════════════════════════════════════
+# تشغيل/إطفاء الميزة
+USERNAME_FINDER_ENABLED = True
+
+# مفتاح Gemini (يُقرأ من Render Environment)
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
+
+# المنصات المدعومة (socialscan)
+# المتاح: Instagram, Twitter, Snapchat, Reddit, Pinterest, GitHub
+USERNAME_FINDER_PLATFORMS = [
+    "Instagram",
+    "Twitter",
+    "Snapchat",
+]
+
+# ⭐ آيدي الروم المخصص للأمر
+# اتركه 0 لو تبي الأمر يعمل في أي روم
+# ⚠️ استبدله بآيدي رومك (انسخه من Discord)
+USERNAME_FINDER_CHANNEL_ID = 0
