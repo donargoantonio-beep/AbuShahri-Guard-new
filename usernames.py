@@ -26,12 +26,11 @@ SHARED: dict = {}
 # ═══════════════════════════════════════════════════════════════
 
 # قائمة الموديلات (نجرب واحد واحد حتى ينجح)
+# ⚠️ الموديلات القديمة (llama-3.x, gemma2, mixtral) تم إيقافها من Groq
 _GROQ_MODELS = [
-    "llama-3.1-8b-instant",
-    "llama3-8b-8192",
-    "llama3-70b-8192",
-    "gemma2-9b-it",
-    "mixtral-8x7b-32768",
+    "openai/gpt-oss-120b",
+    "openai/gpt-oss-20b",
+    "qwen/qwen3.6-27b",
 ]
 
 
