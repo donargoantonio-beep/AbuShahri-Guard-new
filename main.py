@@ -2980,7 +2980,7 @@ async def on_ready():
 # ═══════════════════════════════════════════════════════════════
 
 def load_extras_module():
-    """يحمل extras.py ويمرر له الدوال المشتركة"""
+    """يحمل extras.py و usernames.py"""
     try:
         import extras
 
@@ -3009,6 +3009,19 @@ def load_extras_module():
 
         extras.load_extras(bot, shared)
         log.info("تم تحميل extras.py بنجاح")
+
+        # ═══════════════════════════════════════════════════════
+        # تحميل usernames.py (ميزة اكتشاف اليوزرات)
+        # ═══════════════════════════════════════════════════════
+        try:
+            import usernames
+            usernames.load_usernames(bot, shared)
+            log.info("تم تحميل usernames.py بنجاح")
+        except ImportError:
+            log.info("usernames.py غير موجود -- تخطي")
+        except Exception as e:
+            log.exception("خطأ في تحميل usernames.py: %s", e)
+
     except ImportError as e:
         log.warning("extras.py غير موجود: %s", e)
     except Exception as e:
