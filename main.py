@@ -3050,3 +3050,16 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+        # ═══════════════════════════════════════════════════════
+        # تحميل usernames.py (ميزة اكتشاف اليوزرات)القسم 21
+        # ═══════════════════════════════════════════════════════
+        try:
+            import usernames
+            usernames.load_usernames(bot, shared)
+            log.info("تم تحميل usernames.py بنجاح")
+        except ImportError:
+            log.info("usernames.py غير موجود -- تخطي")
+        except Exception as e:
+            log.exception("خطأ في تحميل usernames.py: %s", e)
+
