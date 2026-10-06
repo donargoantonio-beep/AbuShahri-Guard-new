@@ -38,9 +38,38 @@ def _init_gemini():
     try:
         import google.generativeai as genai
         genai.configure(api_key=config.GEMINI_API_KEY)
-        _gemini_model = genai.GenerativeModel("gemini-1.5-flash")
-        log.info("تم تهيئة Gemini بنجاح")
-        return _gemini_model
+
+        # ⭐ نجرّب عدة أسماء موديلات حتى واحد يشتغل
+        model_names = [
+            "gemini-2.5-flash",
+            "gemini-2.0-flash",
+            "gemini-flash-latest",
+            "gemini-1.5-flash-latest",
+            "gemini-1.5-flash",
+        ]
+
+        for name in model_names:
+            try:
+                model = genai.GenerativeModel(name)
+                # اختبار سريع
+                _gemini_model = model
+                log.info("تم تهيئة Gemini بنجاح -- الموديل: %s", name)
+                return _gemini_model
+            except Exception as e:
+                log.warning("فشل الموديل %s: %s", name, e)
+                continue
+
+        # لو كل الموديلات فشلت -- اطبع المتاح
+        try:
+            log.error("لا يوجد موديل يعمل. الموديلات المتاحة:")
+            for m in genai.list_models():
+                if "generateContent" in m.supported_generation_methods:
+                    log.error("  - %s", m.name)
+        except Exception as e:
+            log.error("فشل سرد الموديلات: %s", e)
+
+        return None
+
     except ImportError:
         log.error("google-generativeai غير مثبتة")
         return None
@@ -202,7 +231,11 @@ def register_command(bot):
 
         if not candidates:
             await interaction.followup.send(
-                "فشل توليد الأسماء. تأكد من GEMINI_API_KEY."
+                "فشل توليد الأسماء.\n"
+                "تأكد من:\n"
+                "- `GEMINI_API_KEY` في Render Environment\n"
+                "- `google-generativeai` في requirements.txt\n"
+                "- راجع Application logs لمعرفة الخطأ"
             )
             return
 
