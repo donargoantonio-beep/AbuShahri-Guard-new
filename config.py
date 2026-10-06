@@ -393,7 +393,6 @@ GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
 USERNAME_FINDER_PLATFORMS = [
     "Reddit",
     "Instagram",
-    "TikTok",
     "Snapchat",
     "Telegram",
 ]
