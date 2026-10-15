@@ -499,58 +499,7 @@ async def make_welcome_card(member: discord.Member) -> Optional[io.BytesIO]:
     except Exception as e:
         log.exception("فشل إنشاء Welcome Card: %s", e)
         return None
-        # ═══════════════════════════════════════════════════════════════
-# 📊 القسم 8: إحصائيات السيرفر
-# ═══════════════════════════════════════════════════════════════
-
-_last_stats_update = 0.0
-
-
-async def update_guild_stats(guild: discord.Guild):
-    global _last_stats_update
-    if not config.STATS_ENABLED:
-        return
-
-    now = time.time()
-    if now - _last_stats_update < 60:
-        return
-    _last_stats_update = now
-
-    ch = guild.get_channel(config.CH_STATS.get("id"))
-    if not ch:
-        for name in config.CH_STATS["names"]:
-            ch = discord.utils.get(guild.text_channels, name=name)
-            if ch:
-                break
-    if not ch:
-        return
-
-    total = guild.member_count
-    bots = sum(1 for m in guild.members if m.bot)
-    humans = total - bots
-    channels_count = len(guild.channels)
-    roles_count = len(guild.roles)
-
-    new_name = (
-        "Members: " + str(total) + " | "
-        "Humans: " + str(humans) + " | "
-        "Bots: " + str(bots) + " | "
-        "Ch: " + str(channels_count) + " | "
-        "Roles: " + str(roles_count)
-    )
-
-    if len(new_name) > 100:
-        new_name = "Members: " + str(total) + " | H: " + str(humans) + " | B: " + str(bots)
-
-    try:
-        if ch.name != new_name:
-            await ch.edit(name=new_name, reason="تحديث الإحصائيات")
-    except discord.Forbidden:
-        log.warning("لا أملك صلاحية تعديل اسم روم الإحصائيات")
-    except Exception as e:
-        log.warning("فشل تحديث الإحصائيات: %s", e)
-
-
+      
 # ═══════════════════════════════════════════════════════════════
 # 💾 القسم 9: النسخ الاحتياطية الدورية
 # ═══════════════════════════════════════════════════════════════
