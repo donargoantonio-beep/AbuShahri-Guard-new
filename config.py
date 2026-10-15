@@ -1,5 +1,5 @@
 """
-config.py — الإصدار 7.1
+config.py — الإصدار 7.2
 كل إعدادات المملكة في مكان واحد
 """
 
@@ -14,13 +14,8 @@ BOT_OWNER_ID = 813236200142929950
 # ============================================================
 # 🗄️ MongoDB (قاعدة البيانات الدائمة)
 # ============================================================
-# رابط الاتصال بقاعدة البيانات (يُقرأ من Render Environment)
 MONGO_URI = os.getenv("MONGO_URI", "")
-
-# اسم قاعدة البيانات
 MONGO_DB_NAME = "abushahri_guard"
-
-# حالة تفعيل MongoDB (تتغير تلقائياً حسب الاتصال)
 MONGO_ENABLED = bool(MONGO_URI)
 
 
@@ -34,7 +29,6 @@ BANNERS_DIR  = "data/backups/banners"
 LOGS_DIR     = "logs"
 CARDS_DIR    = "data/welcome_cards"
 
-# ملفات البيانات (تُنشأ تلقائياً)
 WARNINGS_FILE      = "data/warnings.json"
 STATE_FILE         = "data/state.json"
 ANTINUKE_FILE      = "data/antinuke.json"
@@ -65,6 +59,17 @@ ROLE_JAIL = {
     "names": ["🚔〢متوقف", "متوقف", "المتوقف", "الموقوف", "محجور", "jail"],
 }
 
+# 👨🏻‍✈️ رتبة وزير الداخلية (يقبل/يرفض/يغلق البرقيات والجنسية)
+ROLE_MINISTER = {
+    "id": None,
+    "names": [
+        "👨🏻‍✈️〢وزير-الداخلية",
+        "وزير-الداخلية",
+        "وزير الداخلية",
+        "وزيرالداخلية",
+    ],
+}
+
 ROLE_TICKET = {
     "id": None,
     "names": ["مسؤول-التذاكر", "مسؤول التذاكر", "Support", "support", "الدعم", "مسؤول-البرقيات"],
@@ -86,7 +91,7 @@ CH_ADMIN_REVIEW = {
     "names": ["admin-review", "admin_review", "مراجعة-الادارة"],
 }
 
-# روم التوقيف (المتوقفين يقعدون فيه)
+# روم التوقيف
 CH_JAIL = {
     "id": 1532133484129161347,
     "names": ["quarantine-zone", "quarantine_zone", "المتوقفين", "التوقيف", "jail"],
@@ -103,22 +108,19 @@ CH_LOG_MANUAL = {
     "names": ["لوق_العقوبات_اليدوية", "العقوبات-اليدوية"],
 }
 
-# 🤖 لوق العقوبات التلقائية (سب، Auto-Mod، Anti-Phishing، Anti-Nuke)
-# ملاحظة: نفس روم admin-review
+# 🤖 لوق العقوبات التلقائية = admin-review
 CH_LOG_AUTO = {
     "id": 1548492573813776435,
     "names": ["admin-review"],
 }
 
-# 🔧 لوق التعديلات (رسائل، رتب، ألقاب، رومات)
-# ملاحظة: نفس روم لوق_رتب
+# 🔧 لوق التعديلات (رسائل، رتب، ألقاب، رومات) = لوق_رتب
 CH_LOG_CHANGES = {
     "id": 1510246552256385124,
     "names": ["لوق_التعديلات", "لوق_رتب"],
 }
 
-# 📜 لوق البرقيات والتقديم
-# ملاحظة: نفس روم admin-review
+# 📜 لوق البرقيات والتقديم = admin-review
 CH_LOG_TICKETS = {
     "id": 1548492573813776435,
     "names": ["admin-review"],
@@ -130,17 +132,17 @@ CH_LOG_LEAVE = {
     "names": ["لوق_الخروج"],
 }
 
-# ─── توافق مع الكود (كل لوق يروح للروم المناسب) ───
-CH_LOG_DELETE     = CH_LOG_CHANGES    # حذف الرسائل → التعديلات
-CH_LOG_JOIN_LEAVE = CH_LOG_LEAVE      # دخول/خروج → لوق الخروج
-CH_LOG_BAN        = CH_LOG_MANUAL     # باند → العقوبات اليدوية
-CH_LOG_ROLES      = CH_LOG_CHANGES    # رتب → التعديلات
-CH_LOG_NICKNAME   = CH_LOG_CHANGES    # ألقاب → التعديلات
-CH_LOG_TIMEOUT    = CH_LOG_MANUAL     # تايم → العقوبات اليدوية
-CH_LOG_NUKE       = CH_LOG_AUTO       # نيوك → العقوبات التلقائية
-CH_LOG_GUILD      = CH_LOG_AUTO       # حماية السيرفر → التلقائية
-CH_LOG_CHANNEL    = CH_LOG_CHANGES    # رومات → التعديلات
-CH_LOG_JAIL       = CH_LOG_MANUAL     # توقيف → العقوبات اليدوية
+# ─── توافق مع الكود ───
+CH_LOG_DELETE     = CH_LOG_CHANGES
+CH_LOG_JOIN_LEAVE = CH_LOG_LEAVE
+CH_LOG_BAN        = CH_LOG_MANUAL
+CH_LOG_ROLES      = CH_LOG_CHANGES
+CH_LOG_NICKNAME   = CH_LOG_CHANGES
+CH_LOG_TIMEOUT    = CH_LOG_MANUAL
+CH_LOG_NUKE       = CH_LOG_AUTO
+CH_LOG_GUILD      = CH_LOG_AUTO
+CH_LOG_CHANNEL    = CH_LOG_CHANGES
+CH_LOG_JAIL       = CH_LOG_MANUAL
 
 
 # ============================================================
@@ -159,35 +161,28 @@ CH_ANNOUNCE = {
     "names": ["روم-الإعلانات", "الاعلانات", "الإعلانات"],
 }
 
-# 📜 روم بانل البرقيات (الزر يظهر هنا)
+# 📜 روم بانل البرقيات
 CH_TICKET_PANEL = {
     "id": 1548500331032354896,
     "names": ["البرقيات", "الدعم-الفني", "support"],
 }
 
-# 🇸🇦 روم بانل الجنسية (الزر يظهر هنا)
+# 🇸🇦 روم بانل الجنسية
 CH_APPLY_PANEL = {
     "id": 1548500336543535224,
     "names": ["التقديم-للسيرفر", "التقديم", "الجنسية"],
 }
 
-# 🎫 تصنيف البرقيات (تُفتح فيه رومات البرقيات)
+# 🎫 تصنيف البرقيات
 CH_TICKET_CATEGORY = {
     "id": None,
     "names": ["البرقيات", "التذاكر", "Tickets", "tickets"],
-}
-
-# 📊 روم الإحصائيات (يتحدث تلقائياً)
-CH_STATS = {
-    "id": 1555459745752686653,
-    "names": ["Server Stats", "الإحصائيات", "stats"],
 }
 
 
 # ============================================================
 # 🛡️ رومات محمية إضافية
 # ============================================================
-# أضف آيديات الرومات اللي تبي تحميها بالقوة
 PROTECTED_CHANNELS = []
 
 
@@ -211,10 +206,6 @@ ANTI_NUKE_THRESHOLDS = {
     "webhook_create": {"count": 2, "seconds": 30},
 }
 
-# نظام العقوبة التدريجية (بدون تحذير):
-#   أول نيك  → حجر مؤقت 24 ساعة
-#   ثاني نيك → حجر دائم
-#   ثالث +   → حجر دائم
 GRADUATED_NUKE_PUNISHMENT = True
 
 
@@ -271,20 +262,16 @@ PHISHING_KEYWORDS = [
 AUTOMOD_ENABLED = True
 
 AUTOMOD_SETTINGS = {
-    # منشنات
     "max_mentions": 6,
     "mentions_action": "warn",
 
-    # رسائل مكررة (سبام)
     "max_duplicates": 3,
     "duplicate_window": 5,
     "duplicate_action": "warn",
 
-    # Zalgo (رموز مشوهة)
     "max_zalgo": 15,
     "zalgo_action": "delete_only",
 
-    # رموز (!@#$%...)
     "max_symbols_percent": 0.5,
     "symbols_action": "delete_only",
 }
@@ -302,19 +289,9 @@ WELCOME_CARD_SIZE     = (900, 300)
 
 
 # ============================================================
-# 📊 إحصائيات السيرفر
-# ============================================================
-STATS_ENABLED        = True
-STATS_UPDATE_MINUTES = 10
-
-
-# ============================================================
 # 📬 إشعار الرتب
 # ============================================================
-# إرسال DM للعضو عند إعطائه رتبة
 ROLE_NOTIFY_ENABLED = True
-
-# تجاهل هذه الرتب (ما نرسل DM عند إعطائها)
 ROLE_NOTIFY_IGNORE = ["🚔〢متوقف", "متوقف", "محجور", "Muted"]
 
 
@@ -335,14 +312,9 @@ RULES_TEXT = """📜 قوانين وعقوبات السيرفر:
 # ============================================================
 # 🚫 الكلمات المحظورة
 # ============================================================
-# البوت يستخدم regex بحدود دقيقة
-# لن يمنع كلمات مثل "مكسور" بسبب وجود "كس" داخلها
 BAD_WORDS = [
-    # عربي
     "كلب", "حمار", "قحبة", "قحبه", "شرموط", "شرطوط", "منيوك",
     "ديوث", "عرص", "خرا", "زق", "طيز", "زب", "سكس", "مخصي",
-
-    # English
     "fuck", "shit", "bitch", "asshole", "dick", "cunt", "bastard",
     "slut", "whore", "pussy", "stfu", "motherfucker", "nigger",
 ]
