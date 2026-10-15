@@ -330,10 +330,11 @@ def find_channel(guild: discord.Guild, cfg: dict,
 
 # ─── اختصارات ───
 
-def get_role_jail(g):    return find_role(g, config.ROLE_JAIL)
-def get_role_ticket(g):  return find_role(g, config.ROLE_TICKET)
-def get_role_apply(g):   return find_role(g, config.ROLE_APPLY)
-def get_role_citizen(g): return find_role(g, config.CITIZEN_ROLE)
+def get_role_jail(g):      return find_role(g, config.ROLE_JAIL)
+def get_role_ticket(g):    return find_role(g, config.ROLE_TICKET)
+def get_role_apply(g):     return find_role(g, config.ROLE_APPLY)
+def get_role_citizen(g):   return find_role(g, config.CITIZEN_ROLE)
+def get_role_minister(g):  return find_role(g, config.ROLE_MINISTER)
 
 def get_ch_admin_review(g):   return find_channel(g, config.CH_ADMIN_REVIEW, "text")
 def get_ch_jail(g):           return find_channel(g, config.CH_JAIL, "text")
@@ -2108,7 +2109,9 @@ async def on_guild_update(before: discord.Guild, after: discord.Guild):
                     discord.Color.green(),
                     {"بواسطة": executor.mention},
                 )
-                # ═══════════════════════════════════════════════════════════════
+
+
+# ═══════════════════════════════════════════════════════════════
 # 👋 القسم 15: أحداث الأعضاء
 # ═══════════════════════════════════════════════════════════════
 
@@ -2496,9 +2499,7 @@ async def on_member_update(before: discord.Member, after: discord.Member):
                 await log_ch.send(embed=embed)
             except Exception:
                 pass
-
-
-# ═══════════════════════════════════════════════════════════════
+                # ═══════════════════════════════════════════════════════════════
 # 📝 القسم 16: on_message_delete
 # ═══════════════════════════════════════════════════════════════
 
@@ -2922,10 +2923,23 @@ class CloseTicketButton(View):
         custom_id="close_ticket_btn_v6",
     )
     async def close_ticket(self, interaction: discord.Interaction, button: Button):
-        role = get_role_ticket(interaction.guild)
-        if not ((role and role in interaction.user.roles) or has_control(interaction.user.id)):
+        # ✅ الصلاحية: مسؤول التذاكر OR وزير الداخلية OR المالك/النائب
+        user_roles = interaction.user.roles if isinstance(interaction.user, discord.Member) else []
+
+        ticket_role = get_role_ticket(interaction.guild)
+        minister_role = get_role_minister(interaction.guild)
+
+        allowed = (
+            (ticket_role and ticket_role in user_roles)
+            or (minister_role and minister_role in user_roles)
+            or has_control(interaction.user.id)
+            or (interaction.guild and interaction.user.id == interaction.guild.owner_id)
+        )
+
+        if not allowed:
             await interaction.response.send_message(
-                "❌ لا تمتلك الصلاحية.", ephemeral=True,
+                "❌ لا تمتلك الصلاحية.",
+                ephemeral=True,
             )
             return
 
@@ -2943,9 +2957,7 @@ class CloseTicketButton(View):
             await interaction.channel.delete()
         except Exception:
             pass
-
-
-# ═══════════════════════════════════════════════════════════════
+            # ═══════════════════════════════════════════════════════════════
 # 🇸🇦 القسم 20: نظام الجنسية
 # ═══════════════════════════════════════════════════════════════
 
@@ -2984,7 +2996,14 @@ class ApplicationModal(Modal, title="🇸🇦 استمارة الهوية الس
         embed.add_field(name="السبب", value=self.q3.value, inline=False)
         embed.set_footer(text="🇸🇦〢Kingdom of Saudi Arabia — نظام الجنسية")
 
-        await admin_ch.send(embed=embed, view=AdminDecisionView(member=interaction.user))
+        # ✅ تمرير اسم المتقدم للـ View عشان يتغير لقبه عند القبول
+        await admin_ch.send(
+            embed=embed,
+            view=AdminDecisionView(
+                member=interaction.user,
+                apply_name=self.q1.value,
+            ),
+        )
         await interaction.response.send_message(
             "✅ تم إرسال طلب جنسيتك للإدارة!", ephemeral=True,
         )
@@ -3004,15 +3023,32 @@ class ApplicationButtonView(View):
 
 
 class AdminDecisionView(View):
-    def __init__(self, member: discord.Member):
+    def __init__(self, member: discord.Member, apply_name: str = ""):
         super().__init__(timeout=None)
         self.member = member
+        self.apply_name = apply_name or ""
 
     async def _check_perm(self, interaction: discord.Interaction) -> bool:
-        role = get_role_apply(interaction.guild)
-        if (role and role in interaction.user.roles) or has_control(interaction.user.id):
+        # ✅ الصلاحية: مسؤول التقديم OR وزير الداخلية OR المالك/النائب
+        user_roles = interaction.user.roles if isinstance(interaction.user, discord.Member) else []
+
+        apply_role = get_role_apply(interaction.guild)
+        minister_role = get_role_minister(interaction.guild)
+
+        allowed = (
+            (apply_role and apply_role in user_roles)
+            or (minister_role and minister_role in user_roles)
+            or has_control(interaction.user.id)
+            or (interaction.guild and interaction.user.id == interaction.guild.owner_id)
+        )
+
+        if allowed:
             return True
-        await interaction.response.send_message("❌ لا تمتلك الصلاحية.", ephemeral=True)
+
+        await interaction.response.send_message(
+            "❌ لا تمتلك الصلاحية.",
+            ephemeral=True,
+        )
         return False
 
     @discord.ui.button(
@@ -3041,6 +3077,30 @@ class AdminDecisionView(View):
         else:
             role_status = "\n⚠️ **الرتبة:** لم يتم العثور عليها"
 
+        # ═══════════════════════════════════════════════════════════
+        # 🎯 تغيير اللقب تلقائياً إلى الاسم اللي كتبه المتقدم
+        # ═══════════════════════════════════════════════════════════
+        nick_status = ""
+        clean_name = (self.apply_name or "").strip()
+
+        if clean_name:
+            new_nick = clean_name[:32]  # حد ديسكورد 32 حرف
+
+            try:
+                await self.member.edit(
+                    nick=new_nick,
+                    reason="تغيير اللقب تلقائياً بعد قبول الجنسية",
+                )
+                nick_status = "\n📝 **اللقب:** تم تغييره إلى `" + new_nick + "`"
+            except discord.Forbidden:
+                nick_status = "\n⚠️ **اللقب:** فشل تغييره (رتبته أعلى من البوت)"
+                log.warning("لا أملك صلاحية تغيير لقب %s", self.member)
+            except Exception as e:
+                nick_status = "\n⚠️ **اللقب:** فشل تغييره"
+                log.warning("فشل تغيير اللقب: %s", e)
+        else:
+            nick_status = "\nℹ️ **اللقب:** لم يتم تمرير اسم"
+
         # ─── DM للعضو ───
         try:
             await self.member.send(
@@ -3048,7 +3108,8 @@ class AdminDecisionView(View):
                 "━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
                 "✅ **تم قبول طلب تقديمك**\n\n"
                 "📋 **السيرفر:** " + interaction.guild.name + "\n"
-                + role_status + "\n\n"
+                + role_status
+                + nick_status + "\n\n"
                 "نتشرف بانضمامك إلينا!\n\n"
                 "━━━━━━━━━━━━━━━━━━━━━━━━━\n"
                 "🇸🇦〢Kingdom of Saudi Arabia"
@@ -3060,7 +3121,8 @@ class AdminDecisionView(View):
         await interaction.response.send_message(
             "✅ **تم قبول طلب** " + self.member.mention
             + "\n🎖️ **الرتبة:** "
-            + (citizen_role.mention if citizen_role else "غير موجودة"),
+            + (citizen_role.mention if citizen_role else "غير موجودة")
+            + ("\n📝 **اللقب الجديد:** `" + clean_name[:32] + "`" if clean_name else ""),
             ephemeral=True,
         )
 
@@ -3093,7 +3155,7 @@ class AdminDecisionView(View):
             "❌ **تم رفض طلب** " + self.member.mention,
             ephemeral=True,
         )
-       # ═══════════════════════════════════════════════════════════════
+        # ═══════════════════════════════════════════════════════════════
 # ⚙️ القسم 21: الأوامر
 # ═══════════════════════════════════════════════════════════════
 
@@ -3112,6 +3174,7 @@ async def check_setup(interaction: discord.Interaction):
         ("رتبة المواطنة", get_role_citizen(guild), config.CITIZEN_ROLE),
         ("رتبة مسؤول التذاكر", get_role_ticket(guild), config.ROLE_TICKET),
         ("رتبة مسؤول التقديم", get_role_apply(guild), config.ROLE_APPLY),
+        ("رتبة وزير الداخلية", get_role_minister(guild), config.ROLE_MINISTER),
     ]
     for label, found, cfg in role_checks:
         if found:
@@ -3133,7 +3196,6 @@ async def check_setup(interaction: discord.Interaction):
         ("روم بانل البرقيات", get_ch_ticket_panel(guild), config.CH_TICKET_PANEL),
         ("روم بانل الجنسية", get_ch_apply_panel(guild), config.CH_APPLY_PANEL),
         ("تصنيف البرقيات", get_cat_ticket(guild), config.CH_TICKET_CATEGORY),
-        ("روم الإحصائيات", guild.get_channel(config.CH_STATS.get("id")), config.CH_STATS),
     ]
     for label, found, cfg in channel_checks:
         if found:
@@ -3190,6 +3252,7 @@ async def test_protection(interaction: discord.Interaction):
         ("moderate_members", "تايم آوت الأعضاء"),
         ("view_audit_log", "قراءة Audit Log"),
         ("manage_webhooks", "إدارة Webhooks"),
+        ("manage_nicknames", "إدارة الألقاب"),
     ]
     for perm, label in perms_needed:
         if getattr(me.guild_permissions, perm, False):
@@ -3423,9 +3486,7 @@ async def reset_violations_cmd(interaction: discord.Interaction, member: discord
             "🇸🇦〢Kingdom of Saudi Arabia",
             ephemeral=True,
         )
-
-
-# ─── الحماية والوزراء ───
+        # ─── الحماية والوزراء ───
 
 @bot.tree.command(name="تعيين_وزير", description="👑 تعيين وزير (المالك فقط)")
 @discord.app_commands.describe(member="العضو")
@@ -4088,4 +4149,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main() 
+    main()
