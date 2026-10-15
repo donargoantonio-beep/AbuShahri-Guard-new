@@ -21,14 +21,13 @@ log = logging.getLogger("extras")
 
 
 # ═══════════════════════════════════════════════════════════════
-# 🔧 القسم 2: الأدوات المشتركة (SHARED + JSON)
+# 🔧 القسم 2: SHARED + أدوات JSON
 # ═══════════════════════════════════════════════════════════════
 
 SHARED: dict = {}
 
 
 def _load_json(path, default):
-    """قراءة ملف JSON بأمان"""
     if not os.path.exists(path):
         return default
     try:
@@ -39,7 +38,6 @@ def _load_json(path, default):
 
 
 def _save_json(path, data):
-    """كتابة ملف JSON بأمان"""
     try:
         os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
         with open(path, "w", encoding="utf-8") as f:
@@ -56,7 +54,6 @@ REMINDERS: list = []
 
 
 def parse_duration(text: str) -> Optional[int]:
-    """يحوّل نص مثل 10m / 2h / 1d / 30s إلى ثواني"""
     if not text:
         return None
 
@@ -80,7 +77,6 @@ def parse_duration(text: str) -> Optional[int]:
 
 
 def format_duration(seconds: int) -> str:
-    """يحول الثواني إلى نص عربي مختصر"""
     if seconds < 60:
         return str(seconds) + " ثانية"
     if seconds < 3600:
@@ -95,13 +91,11 @@ def format_duration(seconds: int) -> str:
 
 
 def load_reminders():
-    """تحميل التذكيرات من JSON (احتياطي)"""
     global REMINDERS
     REMINDERS = _load_json(config.REMINDERS_FILE, [])
 
 
 async def save_reminders():
-    """حفظ التذكيرات (MongoDB أو JSON)"""
     if config.MONGO_ENABLED:
         try:
             from main import mongo_save
@@ -113,7 +107,6 @@ async def save_reminders():
 
 
 async def sync_reminders_from_mongo():
-    """يسحب التذكيرات من MongoDB"""
     global REMINDERS
     if not config.MONGO_ENABLED:
         return
@@ -127,7 +120,6 @@ async def sync_reminders_from_mongo():
 
 
 async def reminder_loop(bot: commands.Bot):
-    """حلقة تتحقق كل 30 ثانية من التذكيرات المستحقة"""
     await bot.wait_until_ready()
     log.info("حلقة التذكيرات بدأت")
 
@@ -141,17 +133,22 @@ async def reminder_loop(bot: commands.Bot):
                     user = await bot.fetch_user(r["user_id"])
                     if user:
                         embed = discord.Embed(
-                            title="تذكير",
-                            description=r["text"],
-                            color=discord.Color.blurple(),
+                            title="⏰ تذكير",
+                            description=(
+                                "━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                                "**" + r["text"] + "**\n"
+                                "━━━━━━━━━━━━━━━━━━━━━━━━━"
+                            ),
+                            color=discord.Color.from_rgb(0, 122, 61),
                             timestamp=discord.utils.utcnow(),
                         )
                         if r.get("channel_id"):
                             ch = bot.get_channel(r["channel_id"])
                             if ch:
-                                embed.add_field(name="الروم", value=ch.mention, inline=False)
+                                embed.add_field(name="📍 الروم", value=ch.mention, inline=False)
                         if r.get("original_link"):
-                            embed.add_field(name="الرابط", value=r["original_link"], inline=False)
+                            embed.add_field(name="🔗 الرابط", value=r["original_link"], inline=False)
+                        embed.set_footer(text="🇸🇦〢Kingdom of Saudi Arabia — التذكيرات")
 
                         await user.send(embed=embed)
                 except Exception as e:
@@ -170,20 +167,22 @@ async def reminder_loop(bot: commands.Bot):
 
 
 # ═══════════════════════════════════════════════════════════════
-# 🔒 القسم 4: نظام الحجر المؤقت
+# 🔒 القسم 4: نظام التوقيف المؤقت
 # ═══════════════════════════════════════════════════════════════
 
 TEMP_ACTIONS: list = []
 
 
 def load_temp_actions():
-    """تحميل العقوبات المؤقتة من JSON (احتياطي)"""
     global TEMP_ACTIONS
     TEMP_ACTIONS = _load_json(config.TEMP_ACTIONS_FILE, [])
 
 
-async def save_temp_actions():
-    """حفظ العقوبات المؤقتة (MongoDB أو JSON)"""
+def save_temp_actions():
+    _save_json(config.TEMP_ACTIONS_FILE, TEMP_ACTIONS)
+
+
+async def save_temp_actions_async():
     if config.MONGO_ENABLED:
         try:
             from main import mongo_save
@@ -195,7 +194,6 @@ async def save_temp_actions():
 
 
 async def sync_temp_actions_from_mongo():
-    """يسحب العقوبات المؤقتة من MongoDB"""
     global TEMP_ACTIONS
     if not config.MONGO_ENABLED:
         return
@@ -209,7 +207,6 @@ async def sync_temp_actions_from_mongo():
 
 
 async def temp_actions_loop(bot: commands.Bot):
-    """حلقة تتحقق كل 30 ثانية من العقوبات المنتهية"""
     await bot.wait_until_ready()
     log.info("حلقة العقوبات المؤقتة بدأت")
 
@@ -240,29 +237,36 @@ async def temp_actions_loop(bot: commands.Bot):
                             remove_jail = SHARED.get("remove_jail")
                             if remove_jail:
                                 ok, msg = await remove_jail(guild, member)
-                                log.info("فك حجر %s: %s", member, msg)
+                                log.info("فك توقيف %s: %s", member, msg)
 
+                    # إشعار في لوق العقوبات اليدوية
                     try:
                         get_ch = SHARED.get("get_ch_admin_review")
                         if get_ch:
                             ch = get_ch(guild)
                             if ch:
                                 embed = discord.Embed(
-                                    title="انتهت مدة الحجر المؤقت",
+                                    title="✅ انتهت مدة التوقيف المؤقت",
+                                    description=(
+                                        "━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                                        "**تم الإفراج عن العضو تلقائياً**\n"
+                                        "━━━━━━━━━━━━━━━━━━━━━━━━━"
+                                    ),
                                     color=discord.Color.green(),
                                     timestamp=discord.utils.utcnow(),
                                 )
                                 embed.add_field(
-                                    name="العضو",
-                                    value="<@" + str(user_id) + "> (" + str(user_id) + ")",
+                                    name="🚔 العضو",
+                                    value="<@" + str(user_id) + "> (`" + str(user_id) + "`)",
                                     inline=False,
                                 )
                                 if action.get("reason"):
                                     embed.add_field(
-                                        name="السبب الأصلي",
+                                        name="📋 السبب الأصلي",
                                         value=action["reason"],
                                         inline=False,
                                     )
+                                embed.set_footer(text="🇸🇦〢Kingdom of Saudi Arabia — نظام العدالة")
                                 await ch.send(embed=embed)
                     except Exception as e:
                         log.warning("فشل إرسال إشعار: %s", e)
@@ -274,7 +278,7 @@ async def temp_actions_loop(bot: commands.Bot):
                     TEMP_ACTIONS.remove(action)
 
             if due:
-                await save_temp_actions()
+                await save_temp_actions_async()
                 log.info("تم إنهاء %d عقوبة مؤقتة", len(due))
 
         except Exception as e:
@@ -294,25 +298,21 @@ PHISHING_PATTERN = re.compile(
 
 
 def detect_phishing(content: str) -> Optional[str]:
-    """يفحص النص ويعيد النطاق المشبوه أو None"""
     if not content:
         return None
 
     lower = content.lower()
 
-    # 1. فحص النطاقات المعروفة
     for domain in config.PHISHING_DOMAINS:
         if domain in lower:
             return domain
 
-    # 2. كلمات مفتاحية + رابط
     has_url = bool(PHISHING_PATTERN.search(content))
     if has_url:
         for kw in config.PHISHING_KEYWORDS:
             if kw.lower() in lower:
                 return "keyword: " + kw + " + رابط"
 
-    # 3. كشف التشابه بالنطاقات الرسمية
     for match in PHISHING_PATTERN.finditer(content):
         domain = match.group(2).lower()
         suspicious_parts = [
@@ -340,22 +340,8 @@ def detect_phishing(content: str) -> Optional[str]:
 
 
 # ═══════════════════════════════════════════════════════════════
-# 🛡️ القسم 6: Auto-Mod
+# 🛡️ القسم 6: Auto-Mod (بدون إيموجي وكابس)
 # ═══════════════════════════════════════════════════════════════
-
-EMOJI_PATTERN = re.compile(
-    "["
-    "\U0001F600-\U0001F64F"
-    "\U0001F300-\U0001F5FF"
-    "\U0001F680-\U0001F6FF"
-    "\U0001F1E0-\U0001F1FF"
-    "\U00002700-\U000027BF"
-    "\U0001F900-\U0001F9FF"
-    "\U00002600-\U000026FF"
-    "\U0001FA70-\U0001FAFF"
-    "]+",
-    flags=re.UNICODE,
-)
 
 ZALGO_RE = re.compile(
     r"[\u0300-\u036f\u0489\u1ab0-\u1aff"
@@ -363,26 +349,7 @@ ZALGO_RE = re.compile(
 )
 
 
-def count_emojis(text: str) -> int:
-    """يعد الإيموجي (بما فيها المخصص)"""
-    count = 0
-    for match in EMOJI_PATTERN.finditer(text):
-        count += len(match.group(0))
-    count += len(re.findall(r"<a?:\w+:\d+>", text))
-    return count
-
-
-def caps_percent(text: str) -> float:
-    """نسبة الحروف الكبيرة"""
-    letters = [c for c in text if c.isalpha()]
-    if not letters:
-        return 0.0
-    upper = sum(1 for c in letters if c.isupper())
-    return upper / len(letters)
-
-
 def symbol_percent(text: str) -> float:
-    """نسبة الرموز"""
     if not text:
         return 0.0
     symbols = sum(1 for c in text if not c.isalnum() and not c.isspace())
@@ -390,32 +357,17 @@ def symbol_percent(text: str) -> float:
 
 
 def count_zalgo(text: str) -> int:
-    """يعد الرموز المشوهة"""
     return len(ZALGO_RE.findall(text))
 
 
 def automod_check(message) -> Optional[dict]:
-    """يفحص الرسالة ويرجع مخالفة أو None"""
     if not config.AUTOMOD_ENABLED:
         return None
 
     s = config.AUTOMOD_SETTINGS
     content = message.content or ""
 
-    if count_emojis(content) > s["max_emojis"]:
-        return {
-            "reason": "spam_emoji",
-            "action": s["emoji_action"],
-            "detail": str(count_emojis(content)) + " إيموجي",
-        }
-
-    if len(content) >= s["caps_min_length"] and caps_percent(content) > s["max_caps_percent"]:
-        return {
-            "reason": "spam_caps",
-            "action": s["caps_action"],
-            "detail": str(int(caps_percent(content) * 100)) + "% حروف كبيرة",
-        }
-
+    # 1. منشنات
     if len(message.mentions) > s["max_mentions"]:
         return {
             "reason": "spam_mentions",
@@ -423,6 +375,7 @@ def automod_check(message) -> Optional[dict]:
             "detail": str(len(message.mentions)) + " منشن",
         }
 
+    # 2. Zalgo
     if count_zalgo(content) > s["max_zalgo"]:
         return {
             "reason": "zalgo",
@@ -430,6 +383,7 @@ def automod_check(message) -> Optional[dict]:
             "detail": str(count_zalgo(content)) + " رمز مشوه",
         }
 
+    # 3. رموز كثيرة
     if len(content) >= 10 and symbol_percent(content) > s["max_symbols_percent"]:
         return {
             "reason": "spam_symbols",
@@ -445,14 +399,12 @@ def automod_check(message) -> Optional[dict]:
 # ═══════════════════════════════════════════════════════════════
 
 def _wrap_text(text: str, max_chars: int = 20) -> str:
-    """يقص النص الطويل"""
     if len(text) <= max_chars:
         return text
     return text[:max_chars - 1] + "..."
 
 
 async def make_welcome_card(member: discord.Member) -> Optional[io.BytesIO]:
-    """ينشئ صورة ترحيب بالأفاتار والاسم"""
     try:
         from PIL import Image, ImageDraw, ImageFont
     except ImportError:
@@ -472,11 +424,9 @@ async def make_welcome_card(member: discord.Member) -> Optional[io.BytesIO]:
         circle_r = 100
 
         draw.ellipse(
-            [
-                circle_x - circle_r - 5, circle_y - circle_r - 5,
-                circle_x + circle_r + 5, circle_y + circle_r + 5,
-            ],
-            fill=accent,
+            [circle_x - circle_r - 5, circle_y - circle_r - 5,
+             circle_x + circle_r + 5, circle_y + circle_r + 5],
+            fill=accent
         )
 
         avatar_bytes = await member.display_avatar.replace(
@@ -549,9 +499,7 @@ async def make_welcome_card(member: discord.Member) -> Optional[io.BytesIO]:
     except Exception as e:
         log.exception("فشل إنشاء Welcome Card: %s", e)
         return None
-
-
-# ═══════════════════════════════════════════════════════════════
+        # ═══════════════════════════════════════════════════════════════
 # 📊 القسم 8: إحصائيات السيرفر
 # ═══════════════════════════════════════════════════════════════
 
@@ -559,9 +507,7 @@ _last_stats_update = 0.0
 
 
 async def update_guild_stats(guild: discord.Guild):
-    """يحدّث اسم روم الإحصائيات"""
     global _last_stats_update
-
     if not config.STATS_ENABLED:
         return
 
@@ -610,7 +556,6 @@ async def update_guild_stats(guild: discord.Guild):
 # ═══════════════════════════════════════════════════════════════
 
 async def periodic_backup_loop(bot: commands.Bot):
-    """يأخذ نسخة احتياطية كل X ساعة"""
     await bot.wait_until_ready()
     log.info("حلقة النسخ الدورية بدأت (كل %d ساعة)", config.PERIODIC_BACKUP_HOURS)
 
@@ -640,100 +585,15 @@ async def periodic_backup_loop(bot: commands.Bot):
         except Exception as e:
             log.exception("خطأ في periodic_backup_loop: %s", e)
 
-# ═══════════════════════════════════════════════════════════════
-# 🔄 القسم 9.5: تجديد البانلات التلقائي
-# ═══════════════════════════════════════════════════════════════
-
-async def auto_refresh_panels_loop(bot: commands.Bot):
-    """
-    كل X دقيقة:
-    - يحذف البانلات القديمة (التذاكر + التقديم)
-    - يرسل بانلات جديدة
-    - يضمن أن الأزرار شغالة دائماً
-    """
-    await bot.wait_until_ready()
-    log.info("حلقة تجديد البانلات بدأت (كل %d دقيقة)",
-             config.PANEL_AUTO_REFRESH_MINUTES)
-
-    while True:
-        try:
-            await asyncio.sleep(config.PANEL_AUTO_REFRESH_MINUTES * 60)
-
-            get_ticket_panel = SHARED.get("get_ch_ticket_panel")
-            get_apply_panel = SHARED.get("get_ch_apply_panel")
-
-            for guild in bot.guilds:
-                # ---------- بانل التذاكر ----------
-                if get_ticket_panel:
-                    try:
-                        ch = get_ticket_panel(guild)
-                        if ch:
-                            # احذف القديم
-                            deleted = 0
-                            async for msg in ch.history(limit=50):
-                                if msg.author == bot.user and msg.embeds:
-                                    for emb in msg.embeds:
-                                        if emb.title and "مركز الدعم" in emb.title:
-                                            try:
-                                                await msg.delete()
-                                                deleted += 1
-                                            except Exception:
-                                                pass
-                                            break
-
-                            # أرسل الجديد
-                            from main import TicketButtonView
-                            embed = discord.Embed(
-                                title="مركز الدعم الفني",
-                                description="اضغط على الزر أدناه لفتح تذكرة خاصة للتواصل مع الإدارة.",
-                                color=discord.Color.green(),
-                            )
-                            await ch.send(embed=embed, view=TicketButtonView())
-                            log.info("تم تجديد بانل التذاكر في %s (حذف %d)",
-                                     guild.name, deleted)
-                    except Exception as e:
-                        log.warning("فشل تجديد بانل التذاكر: %s", e)
-
-                # ---------- بانل التقديم ----------
-                if get_apply_panel:
-                    try:
-                        ch = get_apply_panel(guild)
-                        if ch:
-                            deleted = 0
-                            async for msg in ch.history(limit=50):
-                                if msg.author == bot.user and msg.embeds:
-                                    for emb in msg.embeds:
-                                        if emb.title and "التقديم للسيرفر" in emb.title:
-                                            try:
-                                                await msg.delete()
-                                                deleted += 1
-                                            except Exception:
-                                                pass
-                                            break
-
-                            from main import ApplicationButtonView
-                            embed = discord.Embed(
-                                title="التقديم للسيرفر",
-                                description="اضغط على الزر أدناه لتعبئة استمارة التقديم.",
-                                color=discord.Color.purple(),
-                            )
-                            await ch.send(embed=embed, view=ApplicationButtonView())
-                            log.info("تم تجديد بانل التقديم في %s (حذف %d)",
-                                     guild.name, deleted)
-                    except Exception as e:
-                        log.warning("فشل تجديد بانل التقديم: %s", e)
-
-        except Exception as e:
-            log.exception("خطأ في auto_refresh_panels_loop: %s", e)
 
 # ═══════════════════════════════════════════════════════════════
 # ⚙️ القسم 10: الأوامر
 # ═══════════════════════════════════════════════════════════════
 
 def setup_commands(bot: commands.Bot):
-    """تسجيل كل أوامر extras"""
 
-    @bot.tree.command(name="تذكير", description="ضع تذكيرا بعد مدة محددة")
+    # ─── تذكير ───
+    @bot.tree.command(name="تذكير", description="⏰ ضع تذكيراً بعد مدة محددة")
     @app_commands.describe(
         duration="المدة (مثل: 10m / 2h / 1d / 1h30m)",
         text="نص التذكير",
@@ -743,14 +603,14 @@ def setup_commands(bot: commands.Bot):
         seconds = parse_duration(duration)
         if not seconds:
             await interaction.response.send_message(
-                "صيغة المدة غير صحيحة. أمثلة: 10m / 2h / 1d / 1h30m",
+                "❌ صيغة المدة غير صحيحة.\nأمثلة: `10m` / `2h` / `1d` / `1h30m`",
                 ephemeral=True,
             )
             return
 
         if seconds > 30 * 86400:
             await interaction.response.send_message(
-                "الحد الأقصى 30 يوم.", ephemeral=True
+                "❌ الحد الأقصى 30 يوم.", ephemeral=True
             )
             return
 
@@ -759,7 +619,10 @@ def setup_commands(bot: commands.Bot):
             ok, wait = check_rl(interaction.user.id, "تذكير")
             if not ok:
                 await interaction.response.send_message(
-                    "تجاوزت الحد. انتظر " + str(wait) + " ثانية.", ephemeral=True
+                    "⏱️ **تجاوزت الحد المسموح**\n"
+                    "انتظر **" + str(wait) + "** ثانية.\n"
+                    "🇸🇦〢Kingdom of Saudi Arabia",
+                    ephemeral=True,
                 )
                 return
 
@@ -775,11 +638,17 @@ def setup_commands(bot: commands.Bot):
         await save_reminders()
 
         await interaction.response.send_message(
-            "سأذكرك بعد " + format_duration(seconds) + ".",
+            "⏰ **تم وضع التذكير**\n"
+            "━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+            "🕐 **بعد:** " + format_duration(seconds) + "\n"
+            "📝 **التذكير:** " + text + "\n\n"
+            "━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            "🇸🇦〢Kingdom of Saudi Arabia",
             ephemeral=True,
         )
 
-    @bot.tree.command(name="حجر_موقت", description="حجر مؤقت مع فك تلقائي")
+    # ─── توقيف مؤقت ───
+    @bot.tree.command(name="توقيف_مؤقت", description="🚔 توقيف مؤقت مع فك تلقائي")
     @app_commands.describe(
         member="العضو",
         duration="المدة (مثل: 1h / 1d / 7d)",
@@ -796,27 +665,29 @@ def setup_commands(bot: commands.Bot):
         seconds = parse_duration(duration)
         if not seconds:
             await interaction.response.send_message(
-                "صيغة غير صحيحة. أمثلة: 1h / 1d / 7d", ephemeral=True
+                "❌ صيغة غير صحيحة.\nأمثلة: `1h` / `1d` / `7d`", ephemeral=True
             )
             return
 
         if seconds > 30 * 86400:
             await interaction.response.send_message(
-                "الحد 30 يوم.", ephemeral=True
+                "❌ الحد 30 يوم.", ephemeral=True
             )
             return
 
         apply_jail = SHARED.get("apply_jail")
         if not apply_jail:
             await interaction.response.send_message(
-                "خطأ داخلي.", ephemeral=True
+                "❌ خطأ داخلي.", ephemeral=True
             )
             return
 
         ok, msg = await apply_jail(
             interaction.guild, member,
-            "حجر مؤقت (" + format_duration(seconds) + ") بواسطة "
+            "توقيف مؤقت (" + format_duration(seconds) + ") بواسطة "
             + str(interaction.user) + ": " + reason,
+            duration_text=format_duration(seconds),
+            issued_by=interaction.user,
         )
 
         if not ok:
@@ -831,54 +702,31 @@ def setup_commands(bot: commands.Bot):
             "moderator": interaction.user.id,
             "reason": reason,
         })
-        await save_temp_actions()
+        await save_temp_actions_async()
 
         try:
             await member.send(
-                "حجر مؤقت من " + interaction.guild.name + "\n"
-                "المدة: " + format_duration(seconds) + "\n"
-                "السبب: " + reason
+                "🚔 **قرار توقيف مؤقت**\n"
+                "━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+                "📍 **السيرفر:** " + interaction.guild.name + "\n"
+                "⏱️ **المدة:** `" + format_duration(seconds) + "`\n"
+                "📋 **السبب:** ```" + reason + "```\n\n"
+                "⏳ سيُفك التوقيف تلقائياً بعد انتهاء المدة.\n\n"
+                "━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                "🇸🇦〢Kingdom of Saudi Arabia\n"
+                "⚖️ نظام العدالة"
             )
         except Exception:
             pass
 
-        get_ch = SHARED.get("get_ch_admin_review")
-        if get_ch:
-            ch = get_ch(interaction.guild)
-            if ch:
-                embed = discord.Embed(
-                    title="حجر مؤقت",
-                    color=discord.Color.dark_red(),
-                    timestamp=discord.utils.utcnow(),
-                )
-                embed.add_field(
-                    name="العضو",
-                    value=str(member) + " (" + str(member.id) + ")",
-                    inline=False,
-                )
-                embed.add_field(
-                    name="بواسطة",
-                    value=interaction.user.mention,
-                    inline=False,
-                )
-                embed.add_field(
-                    name="المدة",
-                    value=format_duration(seconds),
-                    inline=True,
-                )
-                embed.add_field(name="السبب", value=reason, inline=False)
-                try:
-                    await ch.send(embed=embed)
-                except Exception:
-                    pass
-
         await interaction.response.send_message(
-            msg + "\nالمدة: " + format_duration(seconds),
+            msg + "\n⏱️ **المدة:** " + format_duration(seconds),
             ephemeral=True,
         )
 
-    @bot.tree.command(name="قائمة_الحجر_الموقت",
-                      description="عرض العقوبات المؤقتة النشطة")
+    # ─── قائمة التوقيفات ───
+    @bot.tree.command(name="قائمة_التوقيف",
+                      description="📋 عرض التوقيفات المؤقتة النشطة")
     async def temp_list_cmd(interaction: discord.Interaction):
         check_control = SHARED.get("require_control")
         if check_control and not await check_control(interaction):
@@ -890,7 +738,8 @@ def setup_commands(bot: commands.Bot):
 
         if not guild_actions:
             await interaction.response.send_message(
-                "لا توجد عقوبات مؤقتة نشطة.", ephemeral=True
+                "ℹ️ لا توجد توقيفات مؤقتة نشطة.",
+                ephemeral=True,
             )
             return
 
@@ -899,33 +748,25 @@ def setup_commands(bot: commands.Bot):
         for a in guild_actions[:20]:
             remaining = int(a["until"] - now)
             lines.append(
-                "<@" + str(a["user_id"]) + "> -- تبقى: " + format_duration(remaining)
+                "🚔 <@" + str(a["user_id"]) + "> — تبقى: **"
+                + format_duration(remaining) + "**"
             )
 
         embed = discord.Embed(
-            title="العقوبات المؤقتة",
-            description="\n".join(lines),
+            title="🚔 التوقيفات المؤقتة النشطة",
+            description=(
+                "━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                + "\n".join(lines)
+                + "\n━━━━━━━━━━━━━━━━━━━━━━━━━"
+            ),
             color=discord.Color.orange(),
+            timestamp=discord.utils.utcnow(),
         )
+        embed.set_footer(text="🇸🇦〢Kingdom of Saudi Arabia — نظام العدالة")
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
-    @bot.tree.command(name="تحديث_الاحصائيات",
-                      description="تحديث روم الإحصائيات يدويا")
-    async def update_stats_cmd(interaction: discord.Interaction):
-        check_control = SHARED.get("require_control")
-        if check_control and not await check_control(interaction):
-            return
-
-        global _last_stats_update
-        _last_stats_update = 0
-
-        await update_guild_stats(interaction.guild)
-        await interaction.response.send_message(
-            "تم تحديث الإحصائيات.", ephemeral=True
-        )
-
-    @bot.tree.command(name="نسخة_الان",
-                      description="أخذ نسخة احتياطية الآن")
+    # ─── نسخة احتياطية ───
+    @bot.tree.command(name="نسخة_احتياطية", description="💾 أخذ نسخة احتياطية فورية")
     async def backup_now_cmd(interaction: discord.Interaction):
         check_control = SHARED.get("require_control")
         if check_control and not await check_control(interaction):
@@ -949,84 +790,29 @@ def setup_commands(bot: commands.Bot):
                 await backup_banner(interaction.guild)
 
             await interaction.followup.send(
-                "تم أخذ نسخة احتياطية كاملة.", ephemeral=True
+                "💾 **نسخة احتياطية كاملة**\n"
+                "━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+                "✅ الرومات والرتب\n"
+                "✅ اسم السيرفر\n"
+                "✅ الأيقونة\n"
+                "✅ البانر\n\n"
+                "🇸🇦〢Kingdom of Saudi Arabia — نظام الحماية",
+                ephemeral=True,
             )
         except Exception as e:
-            await interaction.followup.send("فشل: " + str(e), ephemeral=True)
-
-    @bot.tree.command(name="اختبار_اوتو_مود",
-                      description="اختبار فحص Auto-Mod على نص")
-    @app_commands.describe(text="النص للفحص")
-    async def automod_test_cmd(interaction: discord.Interaction, text: str):
-        check_control = SHARED.get("require_control")
-        if check_control and not await check_control(interaction):
-            return
-
-        class FakeMessage:
-            def __init__(self, content):
-                self.content = content
-                self.mentions = []
-
-        result = automod_check(FakeMessage(text))
-        if result:
-            embed = discord.Embed(
-                title="Auto-Mod يكشف مخالفة",
-                description="السبب: " + result["reason"] + "\n"
-                            "الإجراء: " + result["action"] + "\n"
-                            "التفاصيل: " + result["detail"],
-                color=discord.Color.orange(),
+            await interaction.followup.send(
+                "❌ **فشل النسخ الاحتياطي**\n`" + str(e)[:200] + "`",
+                ephemeral=True,
             )
-        else:
-            embed = discord.Embed(
-                title="النص سليم",
-                description="Auto-Mod لم يجد أي مخالفة.",
-                color=discord.Color.green(),
-            )
-        await interaction.response.send_message(embed=embed, ephemeral=True)
-
-    @bot.tree.command(name="اختبار_التصيد",
-                      description="فحص رابط للتصيد")
-    @app_commands.describe(text="النص للفحص")
-    async def phishing_test_cmd(interaction: discord.Interaction, text: str):
-        check_control = SHARED.get("require_control")
-        if check_control and not await check_control(interaction):
-            return
-
-        result = detect_phishing(text)
-        if result:
-            embed = discord.Embed(
-                title="رابط تصيد مكتشف!",
-                description=result,
-                color=discord.Color.red(),
-            )
-        else:
-            embed = discord.Embed(
-                title="الرابط سليم",
-                color=discord.Color.green(),
-            )
-        await interaction.response.send_message(embed=embed, ephemeral=True)
-
-
-# ═══════════════════════════════════════════════════════════════
+            # ═══════════════════════════════════════════════════════════════
 # 💬 القسم 11: معالج الرسائل (Anti-Phishing + Auto-Mod)
 # ═══════════════════════════════════════════════════════════════
 
 def setup_message_handler(bot: commands.Bot):
-    """يسجل معالج on_message جديد يعمل قبل الموجود في main.py"""
     old_handler = bot.on_message
 
     async def new_message_handler(message: discord.Message):
         if message.author.bot or not message.guild:
-            if old_handler:
-                await old_handler(message)
-            return
-
-        # ✅ تجاهل الصور/الملصقات الفارغة (بدون نص)
-        has_media = bool(message.attachments or message.stickers)
-        has_text = bool((message.content or "").strip())
-
-        if has_media and not has_text:
-            # صورة/ملصق فقط -> تجاهل كلي
             if old_handler:
                 await old_handler(message)
             return
@@ -1039,9 +825,12 @@ def setup_message_handler(bot: commands.Bot):
 
         guild = message.guild
         member = message.author
+        has_text = bool((message.content or "").strip())
 
-        # ---------- Anti-Phishing ----------
-        if config.ANTI_PHISHING_ENABLED:
+        # ═══════════════════════════════════════════════════════════
+        # 🎣 Anti-Phishing
+        # ═══════════════════════════════════════════════════════════
+        if config.ANTI_PHISHING_ENABLED and has_text:
             phishing_url = detect_phishing(message.content or "")
             if phishing_url:
                 try:
@@ -1057,14 +846,21 @@ def setup_message_handler(bot: commands.Bot):
                 if apply_jail:
                     ok, msg = await apply_jail(
                         guild, member,
-                        "Anti-Phishing: " + phishing_url
+                        "Anti-Phishing: " + phishing_url,
+                        duration_text="دائم",
+                        issued_by=None,
                     )
                     punishment_msg = msg
 
                 if log_ch:
                     embed = discord.Embed(
-                        title="Anti-Phishing: تم كشف رابط تصيد",
-                        color=discord.Color.dark_red(),
+                        title="🎣 محاولة تصيّد",
+                        description=(
+                            "━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                            "**تم كشف رابط تصيد وحماية الأعضاء**\n"
+                            "━━━━━━━━━━━━━━━━━━━━━━━━━"
+                        ),
+                        color=discord.Color.from_rgb(139, 0, 0),
                         timestamp=discord.utils.utcnow(),
                     )
                     embed.set_author(
@@ -1072,25 +868,26 @@ def setup_message_handler(bot: commands.Bot):
                         icon_url=member.display_avatar.url,
                     )
                     embed.add_field(
-                        name="العضو",
-                        value=str(member) + " (" + str(member.id) + ")",
+                        name="👤 المخالف",
+                        value=member.mention + "\n`" + str(member.id) + "`",
                         inline=False,
                     )
                     embed.add_field(
-                        name="الرابط المشبوه",
-                        value=phishing_url,
+                        name="🔗 الرابط المشبوه",
+                        value="```" + phishing_url + "```",
                         inline=False,
                     )
                     embed.add_field(
-                        name="الرسالة",
-                        value=(message.content or "")[:500],
+                        name="💬 الرسالة",
+                        value="```" + (message.content or "")[:500] + "```",
                         inline=False,
                     )
                     embed.add_field(
-                        name="العقوبة",
-                        value=punishment_msg or "حجر",
+                        name="🔨 العقوبة",
+                        value=punishment_msg or "توقيف دائم",
                         inline=False,
                     )
+                    embed.set_footer(text="🇸🇦〢Kingdom of Saudi Arabia — تم الحماية بواسطة النظام")
                     try:
                         await log_ch.send(embed=embed)
                     except Exception:
@@ -1099,15 +896,10 @@ def setup_message_handler(bot: commands.Bot):
                 log.warning("Phishing detected: %s -> %s", member, phishing_url)
                 return
 
-        # ---------- Auto-Mod ----------
-        if config.AUTOMOD_ENABLED:
-            # ✅ تجاهل الصور/الملصقات إذا ما كان فيه نص
-            # (نفحص النص دائماً — حتى لو فيه صورة)
-            if not has_text:
-                if old_handler:
-                    await old_handler(message)
-                return
-
+        # ═══════════════════════════════════════════════════════════
+        # 🛡️ Auto-Mod
+        # ═══════════════════════════════════════════════════════════
+        if config.AUTOMOD_ENABLED and has_text:
             result = automod_check(message)
             if result:
                 try:
@@ -1135,22 +927,30 @@ def setup_message_handler(bot: commands.Bot):
                         if save_warnings:
                             await save_warnings()
                         warn_count = len(USER_WARNINGS[member.id])
-                        action_taken = "تحذير رقم " + str(warn_count)
+                        action_taken = "إنذار رقم " + str(warn_count)
 
                         if warn_count >= 3:
                             apply_jail = SHARED.get("apply_jail")
                             if apply_jail:
                                 ok, msg = await apply_jail(
                                     guild, member,
-                                    "Auto-Mod: بلوغ " + str(warn_count) + " تحذيرات"
+                                    "Auto-Mod: بلوغ " + str(warn_count) + " إنذارات",
+                                    duration_text="دائم",
+                                    issued_by=None,
                                 )
-                                action_taken += "\n" + msg + " (حجر دائم)"
+                                action_taken += "\n" + msg + " (توقيف دائم)"
 
                     try:
                         await member.send(
-                            "تنبيه Auto-Mod من " + guild.name + "\n"
-                            "السبب: " + reason + " (" + detail + ")\n"
-                            "الإجراء: " + action_taken
+                            "🛡️ **تنبيه تلقائي — الرقابة**\n"
+                            "━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+                            "📍 **السيرفر:** " + guild.name + "\n"
+                            "⚖️ **السبب:** `" + reason + "`\n"
+                            "📊 **التفاصيل:** " + detail + "\n"
+                            "🔨 **الإجراء:** " + action_taken + "\n\n"
+                            "━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                            "🇸🇦〢Kingdom of Saudi Arabia\n"
+                            "🛡️ نظام الرقابة التلقائي"
                         )
                     except Exception:
                         pass
@@ -1173,7 +973,12 @@ def setup_message_handler(bot: commands.Bot):
                 log_ch = get_ch(guild) if get_ch else None
                 if log_ch:
                     embed = discord.Embed(
-                        title="Auto-Mod: مخالفة تلقائية",
+                        title="🛡️ رقابة تلقائية",
+                        description=(
+                            "━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                            "**تم كشف مخالفة بواسطة النظام**\n"
+                            "━━━━━━━━━━━━━━━━━━━━━━━━━"
+                        ),
                         color=discord.Color.orange(),
                         timestamp=discord.utils.utcnow(),
                     )
@@ -1182,36 +987,37 @@ def setup_message_handler(bot: commands.Bot):
                         icon_url=member.display_avatar.url,
                     )
                     embed.add_field(
-                        name="العضو",
-                        value=str(member) + " (" + str(member.id) + ")",
+                        name="👤 العضو",
+                        value=member.mention + "\n`" + str(member.id) + "`",
                         inline=False,
                     )
                     embed.add_field(
-                        name="الروم",
+                        name="📍 الروم",
                         value=message.channel.mention,
                         inline=True,
                     )
                     embed.add_field(
-                        name="النوع",
-                        value=reason,
+                        name="🔍 النوع",
+                        value="`" + reason + "`",
                         inline=True,
                     )
                     embed.add_field(
-                        name="التفاصيل",
+                        name="📊 التفاصيل",
                         value=detail,
                         inline=True,
                     )
                     embed.add_field(
-                        name="الإجراء",
+                        name="⚠️ الإجراء",
                         value=action_taken,
                         inline=False,
                     )
                     content = (message.content or "")[:500]
                     embed.add_field(
-                        name="الرسالة",
-                        value=content,
+                        name="💬 الرسالة",
+                        value="```" + content + "```",
                         inline=False,
                     )
+                    embed.set_footer(text="🇸🇦〢Kingdom of Saudi Arabia — نظام الرقابة")
                     try:
                         await log_ch.send(embed=embed)
                     except Exception:
@@ -1232,7 +1038,6 @@ def setup_message_handler(bot: commands.Bot):
 # ═══════════════════════════════════════════════════════════════
 
 def load_extras(bot: commands.Bot, shared: dict):
-    """يُحمّل كل الإضافات"""
     SHARED.clear()
     SHARED.update(shared)
 
@@ -1242,7 +1047,7 @@ def load_extras(bot: commands.Bot, shared: dict):
     setup_commands(bot)
     setup_message_handler(bot)
 
-    # ---------- Welcome Card ----------
+    # ─── Welcome Card ───
     async def welcome_card_handler(member: discord.Member):
         if not config.WELCOME_CARD_ENABLED:
             return
@@ -1267,9 +1072,9 @@ def load_extras(bot: commands.Bot, shared: dict):
                 log.warning("فشل إرسال Welcome Card: %s", e)
 
         embed = discord.Embed(
-            title="عضو جديد!",
-            description="مرحبا " + member.mention + " في " + member.guild.name,
-            color=discord.Color.brand_green(),
+            title="🇸🇦 عضو جديد في المملكة!",
+            description="مرحباً " + member.mention + " في 🇸🇦〢Kingdom of Saudi Arabia",
+            color=discord.Color.from_rgb(0, 122, 61),
         )
         embed.set_thumbnail(url=member.display_avatar.url)
         try:
@@ -1279,7 +1084,7 @@ def load_extras(bot: commands.Bot, shared: dict):
 
     bot.add_listener(welcome_card_handler, "on_member_join")
 
-    # ---------- بدء المهام عند on_ready ----------
+    # ─── بدء المهام عند on_ready ───
     async def start_tasks_on_ready():
         if getattr(bot, "_extras_started", False):
             return
@@ -1287,16 +1092,12 @@ def load_extras(bot: commands.Bot, shared: dict):
 
         log.info("بدء تشغيل مهام extras...")
 
-        # اسحب البيانات من MongoDB قبل تشغيل الحلقات
         await sync_reminders_from_mongo()
         await sync_temp_actions_from_mongo()
 
         asyncio.create_task(reminder_loop(bot))
         asyncio.create_task(temp_actions_loop(bot))
 
-        # ← تجديد البانلات
-        if config.PANEL_AUTO_REFRESH:
-            asyncio.create_task(auto_refresh_panels_loop(bot))
         if config.PERIODIC_BACKUP_ENABLED:
             asyncio.create_task(periodic_backup_loop(bot))
 
@@ -1316,34 +1117,3 @@ def load_extras(bot: commands.Bot, shared: dict):
     bot.add_listener(start_tasks_on_ready, "on_ready")
 
     log.info("تم تحميل extras.py -- كل الإضافات شغالة")
-
-# ═══════════════════════════════════════════════════════════════
-# 🔄 القسم 17: تجديد البانلات التلقائي
-# ═══════════════════════════════════════════════════════════════
-# البوت يحذف البانلات القديمة ويرسل جديدة كل X دقيقة
-PANEL_AUTO_REFRESH = True
-PANEL_AUTO_REFRESH_MINUTES = 60  # كل ساعة (تقدر تغيره)
-
-
-
-# ═══════════════════════════════════════════════════════════════
-# 🔎 القسم 19: اكتشاف اليوزرات
-# ═══════════════════════════════════════════════════════════════
-# تشغيل/إطفاء الميزة
-USERNAME_FINDER_ENABLED = True
-
-# مفتاح Gemini (يُقرأ من Render Environment)
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
-
-# المنصات المدعومة (socialscan)
-# المتاح: Instagram, Twitter, Snapchat, Reddit, Pinterest, GitHub
-USERNAME_FINDER_PLATFORMS = [
-    "Instagram",
-    "Twitter",
-    "Snapchat",
-]
-
-# ⭐ آيدي الروم المخصص للأمر
-# اتركه 0 لو تبي الأمر يعمل في أي روم
-# ⚠️ استبدله بآيدي رومك (انسخه من Discord)
-USERNAME_FINDER_CHANNEL_ID = 0
