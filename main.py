@@ -2900,17 +2900,144 @@ class TicketModal(Modal, title="📜 إرسال برقية رسمية"):
         )
 
 
+class NoteModal(Modal, title="📝 إرسال ملاحظة"):
+    note = TextInput(
+        label="الملاحظة",
+        style=discord.TextStyle.paragraph,
+        placeholder="اكتب ملاحظتك بالتفصيل...",
+        required=True,
+        max_length=1000,
+    )
+
+    async def on_submit(self, interaction: discord.Interaction):
+        guild = interaction.guild
+
+        embed = discord.Embed(
+            title="📝 ملاحظة جديدة",
+            description=(
+                "━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                "**وصلت ملاحظة جديدة من عضو**\n"
+                "━━━━━━━━━━━━━━━━━━━━━━━━━"
+            ),
+            color=discord.Color.blue(),
+            timestamp=discord.utils.utcnow(),
+        )
+        embed.set_author(
+            name=str(interaction.user),
+            icon_url=interaction.user.display_avatar.url,
+        )
+        embed.add_field(
+            name="👤 العضو",
+            value=interaction.user.mention + "\n`" + str(interaction.user.id) + "`",
+            inline=False,
+        )
+        embed.add_field(
+            name="📝 الملاحظة",
+            value="```" + self.note.value[:1000] + "```",
+            inline=False,
+        )
+        embed.add_field(
+            name="📍 الروم",
+            value=interaction.channel.mention,
+            inline=True,
+        )
+        embed.add_field(
+            name="📅 التاريخ",
+            value=discord.utils.utcnow().strftime("%Y-%m-%d %H:%M"),
+            inline=True,
+        )
+        embed.set_footer(text="🇸🇦〢Kingdom of Saudi Arabia — نظام الملاحظات")
+
+        # ─── إرسال إلى admin-review ───
+        log_ch = get_ch_admin_review(guild) or get_ch_log_tickets(guild)
+        if log_ch:
+            try:
+                await log_ch.send(embed=embed)
+            except Exception:
+                pass
+
+        # ─── DM للمالك ───
+        try:
+            owner = await interaction.client.fetch_user(config.BOT_OWNER_ID)
+            if owner:
+                await owner.send(embed=embed)
+        except Exception:
+            pass
+
+        await interaction.response.send_message(
+            "✅ **تم إرسال ملاحظتك بنجاح!**\n"
+            "━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+            "📝 **ملاحظتك:** وصلت للإدارة\n"
+            "⏱️ **الرد:** قريباً إن شاء الله\n\n"
+            "💡 **للمتابعة:** افتح برقية رسمية\n\n"
+            "━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            "🇸🇦〢Kingdom of Saudi Arabia",
+            ephemeral=True,
+        )
+
+
 class TicketButtonView(View):
     def __init__(self):
         super().__init__(timeout=None)
 
+    # ─── الصف 1: إرسال برقية ───
     @discord.ui.button(
         label="📜 إرسال برقية",
         style=discord.ButtonStyle.success,
         custom_id="open_ticket_btn_v6",
+        row=0,
     )
     async def send_ticket(self, interaction: discord.Interaction, button: Button):
         await interaction.response.send_modal(TicketModal())
+
+    # ─── الصف 2: إرسال ملاحظة ───
+    @discord.ui.button(
+        label="📝 إرسال ملاحظة",
+        style=discord.ButtonStyle.primary,
+        custom_id="send_note_btn_v6",
+        row=1,
+    )
+    async def send_note(self, interaction: discord.Interaction, button: Button):
+        await interaction.response.send_modal(NoteModal())
+
+    # ─── الصف 3: إعادة تشغيل الأزرار ───
+    @discord.ui.button(
+        label="🔄 إعادة تشغيل الأزرار",
+        style=discord.ButtonStyle.danger,
+        custom_id="restart_panel_btn_v6",
+        row=2,
+    )
+    async def restart_panel(self, interaction: discord.Interaction, button: Button):
+        if not await require_control(interaction):
+            return
+
+        await interaction.response.defer(ephemeral=True)
+
+        # 1. إعادة تسجيل كل الأزرار في البوت
+        try:
+            bot.add_view(TicketButtonView())
+            bot.add_view(CloseTicketButton())
+            bot.add_view(ApplicationButtonView())
+        except Exception as e:
+            log.warning("خطأ في إعادة تسجيل الأزرار: %s", e)
+
+        # 2. تحديث الرسالة الحالية بدون حذفها
+        try:
+            await interaction.message.edit(view=TicketButtonView())
+        except Exception as e:
+            log.warning("فشل تحديث البانل: %s", e)
+
+        await interaction.followup.send(
+            "✅ **تم إعادة تشغيل الأزرار بنجاح!**\n"
+            "━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+            "🔄 **الحالة:** الأزرار شغالة الآن\n"
+            "📜 **البرقية:** جاهزة\n"
+            "📝 **الملاحظة:** جاهزة\n\n"
+            "💡 **ملاحظة:**\n"
+            "إذا استمرت الأزرار معلقة، أعد تشغيل البوت من Render.\n\n"
+            "🇸🇦〢Kingdom of Saudi Arabia",
+            ephemeral=True,
+        )
 
 
 class CloseTicketButton(View):
