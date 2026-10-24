@@ -9,6 +9,8 @@ from collections import defaultdict, deque
 from typing import Optional
 
 import discord
+from dotenv import load_dotenv
+load_dotenv()
 from discord.ext import commands
 from discord.ui import View, Button, Modal, TextInput
 
