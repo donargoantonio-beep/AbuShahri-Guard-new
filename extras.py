@@ -14,11 +14,7 @@ from discord import app_commands
 import config
 
 log = logging.getLogger("extras")
-SHARED: dict = {}
-
-# ═══════════════════════════════════════════════════════════════
-# 🔧 أدوات مساعدة
-# ═══════════════════════════════════════════════════════════════
+SHARED = {}
 
 def _load_json(path, default):
     if not os.path.exists(path): return default
@@ -29,13 +25,10 @@ def _load_json(path, default):
 def _save_json(path, data):
     try:
         with open(path, "w", encoding="utf-8") as f: json.dump(data, f, ensure_ascii=False, indent=2)
-    except Exception as e: log.error("فشل حفظ %s: %s", path, e)
+    except Exception: pass
 
-# ═══════════════════════════════════════════════════════════════
-# ⏰ نظام التذكيرات
-# ═══════════════════════════════════════════════════════════════
-
-REMINDERS: list = []
+REMINDERS = []
+TEMP_ACTIONS = []
 
 def parse_duration(text: str) -> Optional[int]:
     if not text: return None
@@ -54,10 +47,10 @@ def format_duration(seconds: int) -> str:
     if seconds < 86400: return f"{seconds // 3600} ساعة"
     return f"{seconds // 86400} يوم"
 
-async def reminder_loop(bot: commands.Bot):
-    await bot.wait_until_ready()
+async def reminder_loop(bot):
     global REMINDERS
-    REMINDERS = _load_json(config.REMINDERS_FILE, [])
+    await bot.wait_until_ready()
+    REMINDERS = _load_json(config.REMINDERS_FILE if hasattr(config, 'REMINDERS_FILE') else "data/reminders.json", [])
     while True:
         try:
             now = time.time()
@@ -68,26 +61,14 @@ async def reminder_loop(bot: commands.Bot):
                     if user: await user.send(f"⏰ **تذكير:**\n{r['text']}")
                 except Exception: pass
                 REMINDERS.remove(r)
-            if due: _save_json(config.REMINDERS_FILE, REMINDERS)
-        except Exception as e: log.error("خطأ في التذكيرات: %s", e)
+            if due: _save_json("data/reminders.json", REMINDERS)
+        except Exception: pass
         await asyncio.sleep(30)
 
-# ═══════════════════════════════════════════════════════════════
-# 🔒 نظام التوقيف المؤقت
-# ═══════════════════════════════════════════════════════════════
-
-TEMP_ACTIONS: list = []
-
-def load_temp_actions():
+async def temp_actions_loop(bot):
     global TEMP_ACTIONS
-    TEMP_ACTIONS = _load_json(config.TEMP_ACTIONS_FILE, [])
-
-def save_temp_actions():
-    _save_json(config.TEMP_ACTIONS_FILE, TEMP_ACTIONS)
-
-async def temp_actions_loop(bot: commands.Bot):
     await bot.wait_until_ready()
-    load_temp_actions()
+    TEMP_ACTIONS = _load_json("data/temp_actions.json", [])
     while True:
         try:
             now = time.time()
@@ -100,32 +81,23 @@ async def temp_actions_loop(bot: commands.Bot):
                         remove_jail = SHARED.get("remove_jail")
                         if remove_jail: await remove_jail(guild, member)
                 if action in TEMP_ACTIONS: TEMP_ACTIONS.remove(action)
-            if due: save_temp_actions()
-        except Exception as e: log.error("خطأ في العقوبات المؤقتة: %s", e)
+            if due: _save_json("data/temp_actions.json", TEMP_ACTIONS)
+        except Exception: pass
         await asyncio.sleep(30)
 
-# ═══════════════════════════════════════════════════════════════
-# 🎣 مكافحة التصيد (Anti-Phishing)
-# ═══════════════════════════════════════════════════════════════
-
-PHISHING_PATTERN = re.compile(r"(https?://)?([a-z0-9\-\.]+\.[a-z]{2,})(/[^\s]*)?", re.IGNORECASE)
+PHISHING_DOMAINS = ["discord-nitro.com", "discordnitro.com", "discord-gift.com", "steamcommunlty.com", "free-nitro.com", "claim-nitro.com", "dlscord.com", "discordgift.site", "discordgift.xyz"]
 
 def detect_phishing(content: str) -> Optional[str]:
     if not content: return None
     lower = content.lower()
-    for domain in config.PHISHING_DOMAINS:
+    for domain in PHISHING_DOMAINS:
         if domain in lower: return domain
     return None
-
-# ═══════════════════════════════════════════════════════════════
-# ⚙️ تحميل الإضافات
-# ═══════════════════════════════════════════════════════════════
 
 def load_extras(bot: commands.Bot, shared: dict):
     SHARED.clear()
     SHARED.update(shared)
 
-    # ─── أوامر التذكيرات والتوقيف المؤقت ───
     @bot.tree.command(name="تذكير", description="⏰ ضع تذكيراً بعد مدة")
     @app_commands.describe(duration="مثل: 10m / 2h / 1d", text="نص التذكير")
     async def remind_cmd(interaction: discord.Interaction, duration: str, text: str):
@@ -134,7 +106,7 @@ def load_extras(bot: commands.Bot, shared: dict):
             await interaction.response.send_message("❌ صيغة خاطئة (مثال: 10m).", ephemeral=True)
             return
         REMINDERS.append({"user_id": interaction.user.id, "text": text, "due": time.time() + seconds})
-        _save_json(config.REMINDERS_FILE, REMINDERS)
+        _save_json("data/reminders.json", REMINDERS)
         await interaction.response.send_message(f"✅ تم وضع تذكير بعد {format_duration(seconds)}.", ephemeral=True)
 
     @bot.tree.command(name="توقيف_مؤقت", description="🚔 توقيف مؤقت مع فك تلقائي")
@@ -146,24 +118,20 @@ def load_extras(bot: commands.Bot, shared: dict):
         if not seconds:
             await interaction.response.send_message("❌ صيغة خاطئة.", ephemeral=True)
             return
-        
         apply_jail = SHARED.get("apply_jail")
         if not apply_jail:
             await interaction.response.send_message("❌ خطأ داخلي.", ephemeral=True)
             return
-            
         ok, msg = await apply_jail(interaction.guild, member, reason, duration_text=format_duration(seconds), issued_by=interaction.user)
         if ok:
             TEMP_ACTIONS.append({"guild_id": interaction.guild.id, "user_id": member.id, "type": "jail", "until": time.time() + seconds, "reason": reason})
-            save_temp_actions()
+            _save_json("data/temp_actions.json", TEMP_ACTIONS)
             await interaction.response.send_message(msg + f"\n⏱️ المدة: {format_duration(seconds)}", ephemeral=True)
         else:
             await interaction.response.send_message(msg, ephemeral=True)
 
     @bot.tree.command(name="قائمة_التوقيفات", description="📋 عرض التوقيفات المؤقتة")
     async def temp_list_cmd(interaction: discord.Interaction):
-        check = SHARED.get("require_control")
-        if check and not await check(interaction): return
         actions = [a for a in TEMP_ACTIONS if a["guild_id"] == interaction.guild.id]
         if not actions:
             await interaction.response.send_message("ℹ️ لا توجد توقيفات مؤقتة.", ephemeral=True)
@@ -171,29 +139,23 @@ def load_extras(bot: commands.Bot, shared: dict):
         lines = [f"🚔 <@{a['user_id']}> — تبقى: **{format_duration(int(a['until'] - time.time()))}**" for a in actions[:20]]
         await interaction.response.send_message(embed=discord.Embed(title="🚔 التوقيفات المؤقتة", description="\n".join(lines), color=discord.Color.orange()), ephemeral=True)
 
-    # ─── حماية من التصيد (تعمل بالخلفية) ───
     async def anti_phishing_handler(message: discord.Message):
         if message.author.bot or not message.guild: return
         is_exempted = SHARED.get("is_exempted")
         if is_exempted and is_exempted(message.author): return
-        
         link = detect_phishing(message.content)
         if link:
             try: await message.delete()
             except Exception: pass
             apply_jail = SHARED.get("apply_jail")
-            if apply_jail:
-                await apply_jail(message.guild, message.author, f"Anti-Phishing: {link}")
-            log.warning(f"تم حظر رابط تصيد: {link}")
+            if apply_jail: await apply_jail(message.guild, message.author, f"Anti-Phishing: {link}")
 
     bot.add_listener(anti_phishing_handler, "on_message")
 
-    # ─── بدء المهام ───
     async def start_tasks():
         if getattr(bot, "_extras_started", False): return
         bot._extras_started = True
         asyncio.create_task(reminder_loop(bot))
         asyncio.create_task(temp_actions_loop(bot))
-        log.info("✅ تم تشغيل مهام extras بنجاح")
 
     bot.add_listener(start_tasks, "on_ready")
