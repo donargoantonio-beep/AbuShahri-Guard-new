@@ -639,7 +639,92 @@ class AdminDecisionView(View):
         except Exception: pass
         await interaction.message.edit(view=None)
         await interaction.response.send_message(f"❌ تم رفض {self.member.mention}", ephemeral=True)
+# ═══════════════════════════════════════════════════════════════
+# ⚙️ الأوامر الأساسية
+# ═══════════════════════════════════════════════════════════════
 
+@bot.tree.command(name="بانل_البرقيات", description="📜 إرسال بانل البرقيات الرسمية")
+async def send_ticket_panel(interaction: discord.Interaction):
+    if not await require_control(interaction): return
+    ch = get_ch_ticket_panel(interaction.guild)
+    if not ch:
+        await interaction.response.send_message("❌ لم أجد روم بانل البرقيات.", ephemeral=True)
+        return
+    await interaction.response.defer(ephemeral=True)
+    embed = discord.Embed(title="📜 البرقيات الرسمية", description="━━━━━━━━━━━━━━━━━━━━━━━━━\n\n**هل تحتاج مساعدة؟** 🇸🇦\n\nأرسل برقية رسمية للإدارة\n\n━━━━━━━━━━━━━━━━━━━━━━━━━\n📝 **الخطوات:**\n• اضغط الزر أدناه\n• اكتب موضوعك\n• سيُفتح لك روم خاص\n━━━━━━━━━━━━━━━━━━━━━━━━━", color=discord.Color.from_rgb(0, 122, 61))
+    embed.set_footer(text="🇸🇦〢Kingdom of Saudi Arabia — مركز البرقيات")
+    await ch.send(embed=embed, view=TicketButtonView())
+    await interaction.followup.send("✅ تم إرسال بانل البرقيات.", ephemeral=True)
+
+@bot.tree.command(name="بانل_الجنسية", description="🇸🇦 إرسال بانل التقديم للجنسية")
+async def send_apply_panel(interaction: discord.Interaction):
+    if not await require_control(interaction): return
+    ch = get_ch_apply_panel(interaction.guild)
+    if not ch:
+        await interaction.response.send_message("❌ لم أجد روم بانل الجنسية.", ephemeral=True)
+        return
+    await interaction.response.defer(ephemeral=True)
+    embed = discord.Embed(title="🇸🇦 التقديم للجنسية", description="━━━━━━━━━━━━━━━━━━━━━━━━━\n\n📜 **للحصول على الجنسية:**\nاضغط على الزر أدناه\n\n━━━━━━━━━━━━━━━━━━━━━━━━━", color=discord.Color.from_rgb(0, 122, 61))
+    embed.set_footer(text="🇸🇦〢Kingdom of Saudi Arabia — نظام الجنسية")
+    await ch.send(embed=embed, view=ApplicationButtonView())
+    await interaction.followup.send("✅ تم إرسال بانل الجنسية.", ephemeral=True)
+
+@bot.tree.command(name="أمر_توقيف", description="🚔 توقيف عضو")
+@discord.app_commands.describe(member="العضو", reason="السبب")
+async def jail_cmd(interaction: discord.Interaction, member: discord.Member, reason: str = "لم يحدد"):
+    if not await require_control(interaction): return
+    ok, msg = await apply_jail(interaction.guild, member, reason, issued_by=interaction.user)
+    await interaction.response.send_message(msg, ephemeral=True)
+
+@bot.tree.command(name="أمر_إفراج", description="🔓 فك توقيف عضو")
+@discord.app_commands.describe(member="العضو")
+async def unjail_cmd(interaction: discord.Interaction, member: discord.Member):
+    if not await require_control(interaction): return
+    ok, msg = await remove_jail(interaction.guild, member)
+    await interaction.response.send_message(msg, ephemeral=True)
+
+@bot.tree.command(name="إنذار_رسمي", description="⚠️ إنذار رسمي")
+@discord.app_commands.describe(member="العضو", reason="السبب")
+async def warn_cmd(interaction: discord.Interaction, member: discord.Member, reason: str = "لم يحدد"):
+    if not await require_control(interaction): return
+    USER_WARNINGS.setdefault(member.id, []).append({"reason": reason, "date": str(datetime.datetime.now())})
+    await save_warnings()
+    await interaction.response.send_message(f"✅ تم إنذار {member.mention}. الإجمالي: {len(USER_WARNINGS[member.id])}", ephemeral=True)
+
+@bot.tree.command(name="تفتيش_المملكة", description="🔍 فحص الرومات والرتب")
+async def check_setup(interaction: discord.Interaction):
+    if not await require_control(interaction): return
+    await interaction.response.send_message("✅ النظام يعمل بشكل سليم.", ephemeral=True)
+
+@bot.tree.command(name="تعيين_وزير", description="👑 تعيين وزير")
+@discord.app_commands.describe(member="العضو")
+async def setdeputy_cmd(interaction: discord.Interaction, member: discord.Member):
+    if not await require_owner(interaction): return
+    if member.id not in deputy_user_ids:
+        deputy_user_ids.append(member.id)
+        await save_state()
+        await interaction.response.send_message(f"✅ تم تعيين {member.mention} وزيراً.", ephemeral=True)
+    else:
+        await interaction.response.send_message("⚠️ هو وزير بالفعل.", ephemeral=True)
+
+@bot.tree.command(name="حماية_مواطن", description="🛡️ حماية عضو")
+@discord.app_commands.describe(member="العضو")
+async def protect_person_cmd(interaction: discord.Interaction, member: discord.Member):
+    if not await require_control(interaction): return
+    if member.id not in protected_users_list:
+        protected_users_list.append(member.id)
+        await save_state()
+        await interaction.response.send_message(f"🛡️ تم حماية {member.mention}.", ephemeral=True)
+    else:
+        await interaction.response.send_message("⚠️ محمي بالفعل.", ephemeral=True)
+
+@bot.tree.command(name="تنظيف", description="🗑️ حذف رسائل")
+@discord.app_commands.describe(amount="عدد الرسائل")
+async def clear_cmd(interaction: discord.Interaction, amount: int):
+    if not await require_control(interaction): return
+    await interaction.response.defer(ephemeral=True)
+    deleted = await interaction.channel.purge(limit=amount)
+    await interaction.followup.send(f"✅ تم حذف {len(deleted)} رسالة.", ephemeral=True)
 # ═══════════════════════════════════════════════════════════════
 # 🎬 التشغيل
 # ═══════════════════════════════════════════════════════════════
