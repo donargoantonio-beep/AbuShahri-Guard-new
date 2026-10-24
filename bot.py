@@ -22,7 +22,11 @@ import config
 
 # ضع التوكن الخاص بك هنا مباشرة إذا لم يعمل من المتغيرات
 # أو اتركه فارغاً وضعه في Environment Variables في Wispbyte
-TOKEN = os.getenv("DISCORD_TOKEN")
+try:
+    with open("token.txt", "r", encoding="utf-8") as f:
+        TOKEN = f.read().strip()
+except FileNotFoundError:
+    TOKEN = os.getenv("DISCORD_TOKEN")
 
 os.makedirs(config.LOGS_DIR, exist_ok=True)
 logging.basicConfig(
