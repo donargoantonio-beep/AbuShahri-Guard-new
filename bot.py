@@ -652,11 +652,16 @@ async def on_ready():
     await load_all_state_async()
     for guild in bot.guilds:
         await cache_full_guild(guild)
+        
     try:
-        await bot.tree.sync()
-        log.info("تمت مزامنة الأوامر بنجاح")
-    except Exception as e: log.error("فشل مزامنة الأوامر: %s", e)
-
+        # المزامنة الفورية لسيرفر محدد (حسب الآيدي الذي أرسلته)
+        GUILD_ID = 1475975508700303370
+        guild = discord.Object(id=GUILD_ID)
+        bot.tree.copy_global_to(guild=guild)
+        await bot.tree.sync(guild=guild)
+        log.info("تمت مزامنة الأوامر في سيرفرك بنجاح!")
+    except Exception as e: 
+        log.error("فشل مزامنة الأوامر: %s", e)
 def main():
     if not TOKEN or TOKEN == "ضع_التوكن_هنا_إذا_لم_يعمل_المتغير":
         log.error("❌ التوكن غير موجود! ضعه في الكود أو في المتغيرات.")
