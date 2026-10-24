@@ -1828,4 +1828,274 @@ async def on_message(message: discord.Message):
         embed.add_field(name="💬 الرسالة", value="```" + content + "```", inline=False)
         embed.set_footer(text="🇸🇦〢Kingdom of Saudi Arabia — نظام الرقابة")
         try: await admin_ch.send(embed=embed)
+        except Exception: pass# ═══════════════════════════════════════════════════════════════
+# 📜 القسم 19: البرقيات (Ticket System) + الملاحظات + إعادة التشغيل
+# ═══════════════════════════════════════════════════════════════
+class TicketModal(Modal, title="📜 إرسال برقية رسمية"):
+    subject = TextInput(label="الموضوع", placeholder="اكتب موضوع البرقية...", required=True, max_length=100)
+    problem = TextInput(label="المشكلة / الطلب", style=discord.TextStyle.paragraph, placeholder="اشرح مشكلتك...", required=True, max_length=1000)
+    extra = TextInput(label="ملاحظات إضافية (اختياري)", style=discord.TextStyle.paragraph, required=False, max_length=500)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        guild = interaction.guild
+        category = get_cat_ticket(guild)
+        if not category:
+            await interaction.response.send_message("❌ لم أجد تصنيف البرقيات.", ephemeral=True)
+            return
+        existing = next((ch for ch in category.text_channels if str(interaction.user.id) in ch.name), None)
+        if existing:
+            await interaction.response.send_message(f"⚠️ لديك برقية مفتوحة: {existing.mention}", ephemeral=True)
+            return
+            
+        ticket_role = get_role_ticket(guild)
+        overwrites = {
+            guild.default_role: discord.PermissionOverwrite(view_channel=False),
+            interaction.user: discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True),
+            guild.me: discord.PermissionOverwrite(view_channel=True, send_messages=True),
+        }
+        if ticket_role: overwrites[ticket_role] = discord.PermissionOverwrite(view_channel=True, send_messages=True)
+        
+        try:
+            ch = await guild.create_text_channel(f"ticket-{interaction.user.id}", category=category, overwrites=overwrites)
+        except Exception as e:
+            await interaction.response.send_message(f"❌ فشل فتح البرقية: {e}", ephemeral=True)
+            return
+
+        embed = discord.Embed(title="📜 برقية رسمية", color=discord.Color.green(), timestamp=discord.utils.utcnow())
+        embed.add_field(name="👤 العضو", value=interaction.user.mention, inline=False)
+        embed.add_field(name="📋 الموضوع", value=f"```{self.subject.value}```", inline=False)
+        embed.add_field(name="📝 التفاصيل", value=self.problem.value[:1024], inline=False)
+        if self.extra.value: embed.add_field(name="📎 ملاحظات", value=self.extra.value[:1024], inline=False)
+        
+        try: await ch.send(content=f"{interaction.user.mention} | {ticket_role.mention if ticket_role else ''}", embed=embed, view=CloseTicketButton())
         except Exception: pass
+        
+        await interaction.response.send_message(f"✅ تم فتح برقيتك: {ch.mention}", ephemeral=True)
+
+class NoteModal(Modal, title="📝 إرسال ملاحظة"):
+    note = TextInput(label="الملاحظة", style=discord.TextStyle.paragraph, placeholder="اكتب ملاحظتك...", required=True, max_length=1000)
+    async def on_submit(self, interaction: discord.Interaction):
+        embed = discord.Embed(title="📝 ملاحظة جديدة", color=discord.Color.blue(), timestamp=discord.utils.utcnow())
+        embed.set_author(name=str(interaction.user), icon_url=interaction.user.display_avatar.url)
+        embed.add_field(name="👤 العضو", value=interaction.user.mention, inline=False)
+        embed.add_field(name="📝 الملاحظة", value=f"```{self.note.value[:1000]}```", inline=False)
+        
+        log_ch = get_ch_admin_review(interaction.guild)
+        if log_ch:
+            try: await log_ch.send(embed=embed)
+            except Exception: pass
+        try:
+            owner = await interaction.client.fetch_user(config.BOT_OWNER_ID)
+            if owner: await owner.send(embed=embed)
+        except Exception: pass
+        await interaction.response.send_message("✅ **تم إرسال ملاحظتك للإدارة بنجاح!**", ephemeral=True)
+
+class TicketButtonView(View):
+    def __init__(self): super().__init__(timeout=None)
+    
+    @discord.ui.button(label="📜 إرسال برقية", style=discord.ButtonStyle.success, custom_id="btn_ticket")
+    async def send_ticket(self, interaction: discord.Interaction, button: Button): await interaction.response.send_modal(TicketModal())
+    
+    @discord.ui.button(label="📝 إرسال ملاحظة", style=discord.ButtonStyle.primary, custom_id="btn_note")
+    async def send_note(self, interaction: discord.Interaction, button: Button): await interaction.response.send_modal(NoteModal())
+    
+    @discord.ui.button(label="🔄 إعادة تشغيل الأزرار", style=discord.ButtonStyle.danger, custom_id="btn_restart")
+    async def restart_panel(self, interaction: discord.Interaction, button: Button):
+        if not await require_control(interaction): return
+        await interaction.response.defer(ephemeral=True)
+        bot.add_view(TicketButtonView())
+        bot.add_view(CloseTicketButton())
+        bot.add_view(ApplicationButtonView())
+        await interaction.message.edit(view=TicketButtonView())
+        await interaction.followup.send("✅ تم إعادة تشغيل الأزرار بنجاح!", ephemeral=True)
+
+class CloseTicketButton(View):
+    def __init__(self): super().__init__(timeout=None)
+    @discord.ui.button(label="🔒 إغلاق البرقية", style=discord.ButtonStyle.red, custom_id="btn_close_ticket")
+    async def close_ticket(self, interaction: discord.Interaction, button: Button):
+        roles = interaction.user.roles if isinstance(interaction.user, discord.Member) else []
+        if not ((get_role_ticket(interaction.guild) in roles) or (get_role_minister(interaction.guild) in roles) or has_control(interaction.user.id)):
+            await interaction.response.send_message("❌ لا تمتلك الصلاحية.", ephemeral=True)
+            return
+        await interaction.response.send_message("🔒 سيتم إغلاق البرقية خلال دقيقة...", ephemeral=True)
+        await asyncio.sleep(60)
+        try: await interaction.channel.delete()
+        except Exception: pass
+
+# ═══════════════════════════════════════════════════════════════
+# 🇸🇦 القسم 20: نظام الجنسية
+# ═══════════════════════════════════════════════════════════════
+class ApplicationModal(Modal, title="🇸🇦 استمارة الهوية"):
+    q1 = TextInput(label="الاسم", placeholder="الاسم الذي سيظهر كلقب...", required=True, max_length=32)
+    q2 = TextInput(label="العمر", placeholder="عمرك...", required=True, max_length=10)
+    q3 = TextInput(label="سبب الانضمام", style=discord.TextStyle.paragraph, required=True, max_length=500)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        admin_ch = get_ch_log_tickets(interaction.guild)
+        if not admin_ch:
+            await interaction.response.send_message("❌ لم أجد روم استقبال التقديمات.", ephemeral=True)
+            return
+        embed = discord.Embed(title="🇸🇦 طلب جنسية جديد", color=discord.Color.green(), timestamp=discord.utils.utcnow())
+        embed.set_author(name=interaction.user.name, icon_url=interaction.user.display_avatar.url)
+        embed.add_field(name="المتقدم", value=interaction.user.mention, inline=False)
+        embed.add_field(name="الاسم", value=self.q1.value, inline=False)
+        embed.add_field(name="العمر", value=self.q2.value, inline=False)
+        embed.add_field(name="السبب", value=self.q3.value, inline=False)
+        await admin_ch.send(embed=embed, view=AdminDecisionView(member=interaction.user, apply_name=self.q1.value))
+        await interaction.response.send_message("✅ تم إرسال طلبك للإدارة!", ephemeral=True)
+
+class ApplicationButtonView(View):
+    def __init__(self): super().__init__(timeout=None)
+    @discord.ui.button(label="🇸🇦 التقديم للجنسية", style=discord.ButtonStyle.success, custom_id="btn_apply")
+    async def apply_button(self, interaction: discord.Interaction, button: Button): await interaction.response.send_modal(ApplicationModal())
+
+class AdminDecisionView(View):
+    def __init__(self, member: discord.Member, apply_name: str = ""):
+        super().__init__(timeout=None)
+        self.member = member
+        self.apply_name = apply_name or ""
+
+    async def _check_perm(self, interaction: discord.Interaction) -> bool:
+        roles = interaction.user.roles if isinstance(interaction.user, discord.Member) else []
+        if (get_role_apply(interaction.guild) in roles) or (get_role_minister(interaction.guild) in roles) or has_control(interaction.user.id):
+            return True
+        await interaction.response.send_message("❌ لا تمتلك الصلاحية.", ephemeral=True)
+        return False
+
+    @discord.ui.button(label="✅ قبول", style=discord.ButtonStyle.success, custom_id="btn_accept")
+    async def accept_app(self, interaction: discord.Interaction, button: Button):
+        if not await self._check_perm(interaction): return
+        citizen_role = get_role_citizen(interaction.guild)
+        role_status = ""
+        if citizen_role:
+            try:
+                await self.member.add_roles(citizen_role)
+                role_status = f"\n🎖️ الرتبة: {citizen_role.mention}"
+            except Exception: role_status = "\n⚠️ فشل إعطاء الرتبة"
+            
+        nick_status = ""
+        clean_name = self.apply_name.strip()[:32]
+        if clean_name:
+            try:
+                await self.member.edit(nick=clean_name)
+                nick_status = f"\n📝 اللقب: {clean_name}"
+            except Exception: nick_status = "\n⚠️ فشل تغيير اللقب"
+            
+        try: await self.member.send(f"🎉 **مبروك!**\nتم قبول طلبك.\n{role_status}\n{nick_status}")
+        except Exception: pass
+        
+        await interaction.message.edit(view=None)
+        await interaction.response.send_message(f"✅ تم قبول {self.member.mention}", ephemeral=True)
+
+    @discord.ui.button(label="❌ رفض", style=discord.ButtonStyle.red, custom_id="btn_reject")
+    async def reject_app(self, interaction: discord.Interaction, button: Button):
+        if not await self._check_perm(interaction): return
+        try: await self.member.send("❌ نأسف، تم رفض طلبك.")
+        except Exception: pass
+        await interaction.message.edit(view=None)
+        await interaction.response.send_message(f"❌ تم رفض {self.member.mention}", ephemeral=True)
+
+# ═══════════════════════════════════════════════════════════════
+# ⚙️ القسم 21: الأوامر العامة (التي طلبتها)
+# ═══════════════════════════════════════════════════════════════
+@bot.tree.command(name="بانل_البرقيات", description="📜 إرسال بانل البرقيات الرسمية")
+async def send_ticket_panel(interaction: discord.Interaction):
+    if not await require_control(interaction): return
+    ch = get_ch_ticket_panel(interaction.guild)
+    if not ch: return await interaction.response.send_message("❌ لم أجد روم بانل البرقيات.", ephemeral=True)
+    await interaction.response.defer(ephemeral=True)
+    embed = discord.Embed(title="📜 البرقيات الرسمية", color=discord.Color.from_rgb(0, 122, 61), description="━━━━━━━━━━━━━━━━━━━━━━━━━\n\n**هل تحتاج مساعدة؟** 🇸🇦\n\nأرسل برقية رسمية للإدارة أو ملاحظة.\n\n━━━━━━━━━━━━━━━━━━━━━━━━━\n📝 **الخطوات:**\n• اضغط الزر أدناه\n• اكتب موضوعك\n• سيُفتح لك روم خاص أو ستُرسل ملاحظتك\n━━━━━━━━━━━━━━━━━━━━━━━━━")
+    embed.set_footer(text="🇸🇦〢Kingdom of Saudi Arabia — مركز البرقيات")
+    await ch.send(embed=embed, view=TicketButtonView())
+    await interaction.followup.send("✅ تم إرسال بانل البرقيات.", ephemeral=True)
+
+@bot.tree.command(name="بانل_الجنسية", description="🇸🇦 إرسال بانل التقديم للجنسية")
+async def send_apply_panel(interaction: discord.Interaction):
+    if not await require_control(interaction): return
+    ch = get_ch_apply_panel(interaction.guild)
+    if not ch: return await interaction.response.send_message("❌ لم أجد روم بانل الجنسية.", ephemeral=True)
+    await interaction.response.defer(ephemeral=True)
+    embed = discord.Embed(title="🇸🇦 التقديم للجنسية", color=discord.Color.from_rgb(0, 122, 61), description="━━━━━━━━━━━━━━━━━━━━━━━━━\n\n📜 **للحصول على الجنسية:**\nاضغط على الزر أدناه\n\n━━━━━━━━━━━━━━━━━━━━━━━━━")
+    embed.set_footer(text="🇸🇦〢Kingdom of Saudi Arabia — نظام الجنسية")
+    await ch.send(embed=embed, view=ApplicationButtonView())
+    await interaction.followup.send("✅ تم إرسال بانل الجنسية.", ephemeral=True)
+
+@bot.tree.command(name="أمر_توقيف", description="🚔 إصدار قرار توقيف")
+@discord.app_commands.describe(member="العضو", reason="السبب")
+async def jail_cmd(interaction: discord.Interaction, member: discord.Member, reason: str = "لم يحدد"):
+    if not await require_control(interaction): return
+    ok, msg = await apply_jail(interaction.guild, member, reason, issued_by=interaction.user)
+    await interaction.response.send_message(msg, ephemeral=True)
+
+@bot.tree.command(name="أمر_إفراج", description="🔓 فك توقيف عضو")
+@discord.app_commands.describe(member="العضو")
+async def unjail_cmd(interaction: discord.Interaction, member: discord.Member):
+    if not await require_control(interaction): return
+    ok, msg = await remove_jail(interaction.guild, member)
+    await interaction.response.send_message(msg, ephemeral=True)
+
+@bot.tree.command(name="إنذار_رسمي", description="⚠️ إنذار رسمي لعضو")
+@discord.app_commands.describe(member="العضو", reason="السبب")
+async def warn_cmd(interaction: discord.Interaction, member: discord.Member, reason: str = "لم يحدد"):
+    if not await require_control(interaction): return
+    USER_WARNINGS.setdefault(member.id, []).append({"reason": reason, "date": str(datetime.datetime.now())})
+    await save_warnings()
+    if len(USER_WARNINGS[member.id]) >= 3: await apply_jail(interaction.guild, member, "3 إنذارات")
+    await interaction.response.send_message(f"✅ تم إنذار {member.mention}. الإجمالي: {len(USER_WARNINGS[member.id])}", ephemeral=True)
+
+@bot.tree.command(name="سجل_الإنذارات", description="📋 عرض سجل الإنذارات")
+@discord.app_commands.describe(member="العضو")
+async def log_cmd(interaction: discord.Interaction, member: discord.Member):
+    warns = USER_WARNINGS.get(member.id, [])
+    text = "\n".join([f"- {w['reason']}" for w in warns]) or "لا يوجد إنذارات."
+    await interaction.response.send_message(embed=discord.Embed(title=f"سجل {member.name}", description=text, color=discord.Color.orange()), ephemeral=True)
+
+@bot.tree.command(name="تفتيش_المملكة", description="🔍 فحص إعدادات المملكة")
+async def check_cmd(interaction: discord.Interaction):
+    if not await require_control(interaction): return
+    await interaction.response.send_message("✅ النظام يعمل والإعدادات سليمة.", ephemeral=True)
+
+@bot.tree.command(name="تعيين_وزير", description="👑 تعيين وزير")
+@discord.app_commands.describe(member="العضو")
+async def deputy_cmd(interaction: discord.Interaction, member: discord.Member):
+    if not await require_owner(interaction): return
+    if member.id not in deputy_user_ids: 
+        deputy_user_ids.append(member.id); await save_state(); await interaction.response.send_message("✅", ephemeral=True)
+
+@bot.tree.command(name="حماية_مواطن", description="🛡️ حماية عضو من العقوبات")
+@discord.app_commands.describe(member="العضو")
+async def protect_cmd(interaction: discord.Interaction, member: discord.Member):
+    if not await require_control(interaction): return
+    if member.id not in protected_users_list: 
+        protected_users_list.append(member.id); await save_state(); await interaction.response.send_message("✅", ephemeral=True)
+
+@bot.tree.command(name="تنظيف", description="🗑️ حذف رسائل")
+@discord.app_commands.describe(amount="العدد")
+async def clear_cmd(interaction: discord.Interaction, amount: int):
+    if not await require_control(interaction): return
+    await interaction.response.defer(ephemeral=True)
+    d = await interaction.channel.purge(limit=amount)
+    await interaction.followup.send(f"✅ {len(d)}", ephemeral=True)
+
+# ═══════════════════════════════════════════════════════════════
+# 🎬 التشغيل
+# ═══════════════════════════════════════════════════════════════
+@bot.event
+async def on_ready():
+    log.info("البوت متصل: %s", bot.user)
+    bot.add_view(TicketButtonView()); bot.add_view(CloseTicketButton()); bot.add_view(ApplicationButtonView())
+    await load_all_state_async()
+    try:
+        guild = discord.Object(id=1475975508700303370)
+        bot.tree.copy_global_to(guild=guild)
+        await bot.tree.sync(guild=guild)
+        log.info("تمت مزامنة الأوامر في سيرفرك بنجاح!")
+    except Exception as e: log.error("فشل المزامنة: %s", e)
+    
+    try:
+        import extras
+        extras.load_extras(bot, {"apply_jail": apply_jail, "remove_jail": remove_jail, "require_control": require_control, "is_exempted": is_exempted})
+    except: pass
+
+if __name__ == "__main__":
+    if TOKEN and TOKEN != "ضع_التوكن_هنا": bot.run(TOKEN)
