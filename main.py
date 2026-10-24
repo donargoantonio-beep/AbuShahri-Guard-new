@@ -2,6 +2,8 @@
 # 📦 القسم 1: الاستيراد والمكتبات
 # ═══════════════════════════════════════════════════════════════
 import os
+from dotenv import load_dotenv
+load_dotenv()
 import re
 import json
 import time
@@ -22,7 +24,7 @@ try:
     with open("token.txt", "r", encoding="utf-8") as f:
         TOKEN = f.read().strip()
 except FileNotFoundError:
-    TOKEN = os.getenv("DISCORD_TOKEN")
+TOKEN = os.getenv("DISCORD_TOKEN")
 
 # ═══════════════════════════════════════════════════════════════
 # ⚙️ القسم 2: إعداد البوت والنوايا
