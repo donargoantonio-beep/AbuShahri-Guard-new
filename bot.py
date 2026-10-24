@@ -9,19 +9,11 @@ from collections import defaultdict, deque
 from typing import Optional
 
 import discord
-from dotenv import load_dotenv
-load_dotenv()
 from discord.ext import commands
 from discord.ui import View, Button, Modal, TextInput
 
 import config
 
-# ═══════════════════════════════════════════════════════════════
-# ⚙️ الإعدادات الأساسية
-# ═══════════════════════════════════════════════════════════════
-
-# ضع التوكن الخاص بك هنا مباشرة إذا لم يعمل من المتغيرات
-# أو اتركه فارغاً وضعه في Environment Variables في Wispbyte
 try:
     with open("token.txt", "r", encoding="utf-8") as f:
         TOKEN = f.read().strip()
@@ -29,12 +21,7 @@ except FileNotFoundError:
     TOKEN = os.getenv("DISCORD_TOKEN")
 
 os.makedirs(config.LOGS_DIR, exist_ok=True)
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S",
-    handlers=[logging.FileHandler(config.BOT_LOG_FILE, encoding="utf-8"), logging.StreamHandler()],
-)
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s", handlers=[logging.FileHandler(config.BOT_LOG_FILE, encoding="utf-8"), logging.StreamHandler()])
 log = logging.getLogger("bot")
 
 for d in [config.DATA_DIR, config.BACKUPS_DIR, config.ICONS_DIR, config.BANNERS_DIR, config.LOGS_DIR, config.CARDS_DIR]:
@@ -45,59 +32,36 @@ intents.message_content = True
 intents.guilds = True
 intents.members = True
 intents.voice_states = True
-
 bot = commands.Bot(command_prefix="!nobotprefix!", intents=intents, help_command=None)
 
-# ═══════════════════════════════════════════════════════════════
-# 💾 الحالة العامة
-# ═══════════════════════════════════════════════════════════════
-VOICE_CHANNEL_ID: int = 0
-USER_WARNINGS: dict = {}
-saved_roles: dict = {}
-protected_users_list: list = []
-protected_roles_list: list = []
-deputy_user_ids: list = []
-trusted_bots: list = []
-NUKE_TRACKER: dict = defaultdict(lambda: defaultdict(lambda: defaultdict(deque)))
-NUKE_STRIKES: dict = defaultdict(lambda: defaultdict(int))
-RATE_LIMIT_TRACKER: dict = defaultdict(lambda: defaultdict(deque))
-GUILD_CACHE: dict = defaultdict(lambda: {"channels": {}, "roles": {}})
+VOICE_CHANNEL_ID = 0
+USER_WARNINGS, saved_roles, protected_users_list = {}, {}, []
+protected_roles_list, deputy_user_ids, trusted_bots = [], [], []
+NUKE_TRACKER = defaultdict(lambda: defaultdict(lambda: defaultdict(deque)))
+NUKE_STRIKES = defaultdict(lambda: defaultdict(int))
+GUILD_CACHE = defaultdict(lambda: {"channels": {}, "roles": {}})
 
-def _read_json(path: str, default):
+def _read_json(path, default):
     if not os.path.exists(path): return default
     try:
         with open(path, "r", encoding="utf-8") as f: return json.load(f)
     except Exception: return default
 
-def _write_json(path: str, data) -> None:
+def _write_json(path, data):
     try:
-        tmp = path + ".tmp"
-        with open(tmp, "w", encoding="utf-8") as f: json.dump(data, f, ensure_ascii=False, indent=2)
-        os.replace(tmp, path)
-    except Exception as e: log.error("خطأ في حفظ %s: %s", path, e)
+        with open(path, "w", encoding="utf-8") as f: json.dump(data, f, ensure_ascii=False, indent=2)
+    except Exception: pass
 
-async def async_save_json(path: str, data) -> None:
-    await asyncio.to_thread(_write_json, path, data)
+async def save_warnings():
+    await asyncio.to_thread(_write_json, config.WARNINGS_FILE, {str(k): v for k, v in USER_WARNINGS.items()})
 
-async def save_warnings() -> None:
-    await async_save_json(config.WARNINGS_FILE, {str(k): v for k, v in USER_WARNINGS.items()})
+async def save_state():
+    data = {"protected_users": protected_users_list, "protected_roles": protected_roles_list, "deputies": deputy_user_ids, "trusted_bots": trusted_bots, "voice_channel_id": VOICE_CHANNEL_ID, "saved_roles": {str(k): v for k, v in saved_roles.items()}}
+    await asyncio.to_thread(_write_json, config.STATE_FILE, data)
 
-async def save_state() -> None:
-    data = {
-        "protected_users": protected_users_list, "protected_roles": protected_roles_list,
-        "deputies": deputy_user_ids, "trusted_bots": trusted_bots,
-        "voice_channel_id": VOICE_CHANNEL_ID, "saved_roles": {str(k): v for k, v in saved_roles.items()},
-    }
-    await async_save_json(config.STATE_FILE, data)
-
-async def save_nuke_strikes() -> None:
-    data = {str(gid): {str(uid): c for uid, c in users.items()} for gid, users in NUKE_STRIKES.items()}
-    await async_save_json(config.ANTINUKE_FILE, data)
-
-async def load_all_state_async() -> None:
-    global USER_WARNINGS, saved_roles, protected_users_list, protected_roles_list, deputy_user_ids, VOICE_CHANNEL_ID, trusted_bots, NUKE_STRIKES
-    raw = _read_json(config.WARNINGS_FILE, {})
-    USER_WARNINGS = {int(k): v for k, v in raw.items()}
+async def load_all_state():
+    global USER_WARNINGS, saved_roles, protected_users_list, protected_roles_list, deputy_user_ids, VOICE_CHANNEL_ID, trusted_bots
+    USER_WARNINGS = {int(k): v for k, v in _read_json(config.WARNINGS_FILE, {}).items()}
     state = _read_json(config.STATE_FILE, {})
     protected_users_list = state.get("protected_users", [])
     protected_roles_list = state.get("protected_roles", [])
@@ -105,33 +69,24 @@ async def load_all_state_async() -> None:
     trusted_bots = state.get("trusted_bots", [])
     VOICE_CHANNEL_ID = state.get("voice_channel_id", 0)
     saved_roles = {int(k): v for k, v in state.get("saved_roles", {}).items()}
-    strikes = _read_json(config.ANTINUKE_FILE, {})
-    NUKE_STRIKES = defaultdict(lambda: defaultdict(int))
-    for gid, users in strikes.items():
-        for uid, count in users.items(): NUKE_STRIKES[int(gid)][int(uid)] = count
 
-# ═══════════════════════════════════════════════════════════════
-# 🔍 البحث الذكي والصلاحيات
-# ═══════════════════════════════════════════════════════════════
-def find_role(guild: discord.Guild, cfg: dict) -> Optional[discord.Role]:
+def find_role(guild, cfg):
     if cfg.get("id"):
-        role = guild.get_role(cfg["id"])
-        if role: return role
+        r = guild.get_role(cfg["id"])
+        if r: return r
     for name in cfg["names"]:
-        role = discord.utils.get(guild.roles, name=name)
-        if role: return role
+        r = discord.utils.get(guild.roles, name=name)
+        if r: return r
     return None
 
-def find_channel(guild: discord.Guild, cfg: dict, channel_type: str = "text") -> Optional[discord.abc.GuildChannel]:
+def find_channel(guild, cfg, t="text"):
     if cfg.get("id"):
-        ch = guild.get_channel(cfg["id"])
-        if ch: return ch
-    if channel_type == "text": channels = guild.text_channels
-    elif channel_type == "category": channels = guild.categories
-    else: channels = guild.channels
+        c = guild.get_channel(cfg["id"])
+        if c: return c
+    channels = guild.text_channels if t == "text" else guild.categories
     for name in cfg["names"]:
-        for ch in channels:
-            if ch.name == name or ch.name.startswith(name): return ch
+        for c in channels:
+            if c.name == name or c.name.startswith(name): return c
     return None
 
 def get_role_jail(g): return find_role(g, config.ROLE_JAIL)
@@ -139,619 +94,242 @@ def get_role_ticket(g): return find_role(g, config.ROLE_TICKET)
 def get_role_apply(g): return find_role(g, config.ROLE_APPLY)
 def get_role_citizen(g): return find_role(g, config.CITIZEN_ROLE)
 def get_role_minister(g): return find_role(g, config.ROLE_MINISTER)
-
-def get_ch_admin_review(g): return find_channel(g, config.CH_ADMIN_REVIEW, "text")
-def get_ch_jail(g): return find_channel(g, config.CH_JAIL, "text")
-def get_ch_log_manual(g): return find_channel(g, config.CH_LOG_MANUAL, "text")
-def get_ch_log_auto(g): return find_channel(g, config.CH_LOG_AUTO, "text")
-def get_ch_log_changes(g): return find_channel(g, config.CH_LOG_CHANGES, "text")
-def get_ch_log_tickets(g): return find_channel(g, config.CH_LOG_TICKETS, "text")
-def get_ch_log_leave(g): return find_channel(g, config.CH_LOG_LEAVE, "text")
-def get_ch_log_nuke(g): return find_channel(g, config.CH_LOG_NUKE, "text")
-def get_ch_log_guild(g): return find_channel(g, config.CH_LOG_GUILD, "text")
-def get_ch_welcome(g): return find_channel(g, config.CH_WELCOME, "text")
-def get_ch_announce(g): return find_channel(g, config.CH_ANNOUNCE, "text")
-def get_ch_ticket_panel(g): return find_channel(g, config.CH_TICKET_PANEL, "text")
-def get_ch_apply_panel(g): return find_channel(g, config.CH_APPLY_PANEL, "text")
+def get_ch_admin_review(g): return find_channel(g, config.CH_ADMIN_REVIEW)
+def get_ch_jail(g): return find_channel(g, config.CH_JAIL)
+def get_ch_log_changes(g): return find_channel(g, config.CH_LOG_CHANGES)
+def get_ch_log_tickets(g): return find_channel(g, config.CH_LOG_TICKETS)
+def get_ch_log_leave(g): return find_channel(g, config.CH_LOG_LEAVE)
+def get_ch_log_nuke(g): return find_channel(g, config.CH_LOG_NUKE)
+def get_ch_log_auto(g): return find_channel(g, config.CH_LOG_AUTO)
+def get_ch_welcome(g): return find_channel(g, config.CH_WELCOME)
+def get_ch_announce(g): return find_channel(g, config.CH_ANNOUNCE)
+def get_ch_ticket_panel(g): return find_channel(g, config.CH_TICKET_PANEL)
+def get_ch_apply_panel(g): return find_channel(g, config.CH_APPLY_PANEL)
 def get_cat_ticket(g): return find_channel(g, config.CH_TICKET_CATEGORY, "category")
 
-def is_owner(user_id: int) -> bool: return user_id == config.BOT_OWNER_ID
-def is_deputy(user_id: int) -> bool: return user_id in deputy_user_ids
-def has_control(user_id: int) -> bool: return is_owner(user_id) or is_deputy(user_id)
+def is_owner(uid): return uid == config.BOT_OWNER_ID
+def is_deputy(uid): return uid in deputy_user_ids
+def has_control(uid): return is_owner(uid) or is_deputy(uid)
 
-def is_exempted(member) -> bool:
-    if member is None: return False
-    user_id = member.id
-    if is_owner(user_id) or is_deputy(user_id): return True
-    if isinstance(member, discord.Member):
-        if member.guild and user_id == member.guild.owner_id: return True
-        protected_ids = set(protected_roles_list)
-        if any(r.id in protected_ids for r in member.roles): return True
-    if user_id in protected_users_list: return True
-    if getattr(member, "bot", False) and user_id in trusted_bots: return True
+def is_exempted(m):
+    if not m: return False
+    if is_owner(m.id) or is_deputy(m.id): return True
+    if isinstance(m, discord.Member):
+        if m.guild and m.id == m.guild.owner_id: return True
+        if any(r.id in protected_roles_list for r in m.roles): return True
+    if m.id in protected_users_list: return True
+    if getattr(m, "bot", False) and m.id in trusted_bots: return True
     return False
 
-async def require_control(interaction: discord.Interaction) -> bool:
-    if has_control(interaction.user.id) or (interaction.guild and interaction.user.id == interaction.guild.owner_id): return True
-    await interaction.response.send_message("🔒 **عذراً** — هذا الأمر مخصص لـ **مالك البوت والنواب** فقط.\n🇸🇦〢Kingdom of Saudi Arabia", ephemeral=True)
+async def require_control(i):
+    if has_control(i.user.id) or (i.guild and i.user.id == i.guild.owner_id): return True
+    await i.response.send_message("🔒 هذا الأمر للإدارة فقط.", ephemeral=True)
     return False
 
-async def require_owner(interaction: discord.Interaction) -> bool:
-    if is_owner(interaction.user.id) or (interaction.guild and interaction.user.id == interaction.guild.owner_id): return True
-    await interaction.response.send_message("🔒 **عذراً** — هذا الأمر مخصص لـ **مالك البوت** فقط.\n🇸🇦〢Kingdom of Saudi Arabia", ephemeral=True)
+async def require_owner(i):
+    if is_owner(i.user.id) or (i.guild and i.user.id == i.guild.owner_id): return True
+    await i.response.send_message("🔒 هذا الأمر للمالك فقط.", ephemeral=True)
     return False
 
-def bot_can_manage(target, guild: discord.Guild):
-    me = guild.me
+def bot_can_manage(target, guild):
     if isinstance(target, discord.Member):
-        if target.id == guild.owner_id: return False, "لا أستطيع تعديل مالك السيرفر"
-        if target.top_role >= me.top_role: return False, "رتبته أعلى أو تساوي رتبة البوت"
-    if isinstance(target, discord.Role):
-        if target.is_default(): return False, "لا يمكن تعديل @everyone"
-        if target >= me.top_role: return False, "الرتبة أعلى أو تساوي رتبة البوت"
+        if target.id == guild.owner_id: return False, "لا يمكن تعديل المالك"
+        if target.top_role >= guild.me.top_role: return False, "رتبته أعلى من البوت"
     return True, ""
 
-def check_rate_limit(user_id: int, command: str):
-    if command not in config.RATE_LIMITS: return True, 0
-    limit = config.RATE_LIMITS[command]
-    now = time.time()
-    dq = RATE_LIMIT_TRACKER[user_id][command]
-    while dq and now - dq[0] > limit["window"]: dq.popleft()
-    if len(dq) >= limit["max"]: return False, int(limit["window"] - (now - dq[0])) + 1
-    dq.append(now)
-    return True, 0
-
-# ═══════════════════════════════════════════════════════════════
-# 🧹 تطبيع النص والكلمات المحظورة
-# ═══════════════════════════════════════════════════════════════
-_TASHKEEL_RE = re.compile(r'[\u0617-\u061A\u064B-\u0652]')
-_NON_ALNUM_RE = re.compile(r'[^a-zA-Z\u0600-\u06FF]')
-_DUP_RE = re.compile(r'(.)\1+')
-
-def normalize_text(text: str):
-    text = text.lower()
-    text = _TASHKEEL_RE.sub('', text)
-    cleaned = _NON_ALNUM_RE.sub('', text)
-    return text, cleaned, _DUP_RE.sub(r'\1', cleaned)
-
-BAD_WORDS_RE = re.compile("|".join([r'(?<![\u0600-\u06FF])' + re.escape(w) + r'(?![\u0600-\u06FF])' if re.search(r'[\u0600-\u06FF]', w) else r'(?<![a-zA-Z])' + re.escape(w) + r'(?![a-zA-Z])' for w in config.BAD_WORDS]), re.IGNORECASE)
-URL_REGEX = re.compile(r"(https?://\S+|discord\.gg/\S+|discord\.com/invite/\S+|www\.\S+)", re.IGNORECASE)
-
-# ═══════════════════════════════════════════════════════════════
-# 🔒 نظام التوقيف
-# ═══════════════════════════════════════════════════════════════
-async def apply_jail(guild: discord.Guild, member: discord.Member, reason: str, duration_text: str = "دائم", issued_by=None):
-    if is_exempted(member): return False, "🛡️ هذا العضو محمي، لا يمكن توقيفه."
+async def apply_jail(guild, member, reason, duration_text="دائم", issued_by=None):
+    if is_exempted(member): return False, "🛡️ محمي."
     jail_role = get_role_jail(guild)
-    if not jail_role: return False, "❌ لم أجد رتبة التوقيف في config.py."
-    if jail_role >= guild.me.top_role: return False, "❌ رتبة التوقيف أعلى من رتبة البوت."
+    if not jail_role: return False, "❌ رتبة التوقيف غير موجودة."
+    if jail_role >= guild.me.top_role: return False, "❌ رتبة التوقيف أعلى من البوت."
     try:
         if jail_role not in member.roles:
             saved_roles[member.id] = [r.id for r in member.roles if r != guild.default_role and r != jail_role]
         await member.edit(roles=[jail_role], reason=reason)
         if member.voice: await member.move_to(None)
         await save_state()
-        return True, "🚔 تم تطبيق قرار التوقيف بنجاح."
-    except Exception as e: return False, "❌ فشل التوقيف: " + str(e)
+        return True, "🚔 تم التوقيف."
+    except Exception as e: return False, "❌ فشل التوقيف."
 
-async def remove_jail(guild: discord.Guild, member: discord.Member):
+async def remove_jail(guild, member):
     jail_role = get_role_jail(guild)
     if jail_role and jail_role in member.roles:
         try: await member.remove_roles(jail_role)
         except Exception: pass
     if member.id in saved_roles:
-        roles_to_restore = [guild.get_role(rid) for rid in saved_roles.pop(member.id) if guild.get_role(rid) and guild.get_role(rid) < guild.me.top_role]
-        if roles_to_restore:
-            try: await member.add_roles(*roles_to_restore, reason="فك التوقيف")
+        roles = [guild.get_role(rid) for rid in saved_roles.pop(member.id) if guild.get_role(rid) and guild.get_role(rid) < guild.me.top_role]
+        if roles:
+            try: await member.add_roles(*roles, reason="فك التوقيف")
             except Exception: pass
     await save_state()
-    return True, "🔓 تم الإفراج عن العضو واستعادة الرتب."
+    return True, "🔓 تم الإفراج."
 
 # ═══════════════════════════════════════════════════════════════
-# 🛡️ Anti-Nuke
+# 🎫 أنظمة (البرقيات والجنسية)
 # ═══════════════════════════════════════════════════════════════
-def record_action(guild_id: int, user_id: int, action: str) -> int:
-    if action not in config.ANTI_NUKE_THRESHOLDS: return 0
-    dq = NUKE_TRACKER[guild_id][user_id][action]
-    dq.append(time.time())
-    while dq and time.time() - dq[0] > config.ANTI_NUKE_THRESHOLDS[action]["seconds"]: dq.popleft()
-    return len(dq)
-
-def is_nuke(guild_id: int, user_id: int, action: str) -> bool:
-    return action in config.ANTI_NUKE_THRESHOLDS and record_action(guild_id, user_id, action) > config.ANTI_NUKE_THRESHOLDS[action]["count"]
-
-async def get_audit_executor(guild: discord.Guild, action: discord.AuditLogAction, target_id: int):
-    try:
-        async for entry in guild.audit_logs(limit=5, action=action):
-            if entry.target and entry.target.id == target_id and (discord.utils.utcnow() - entry.created_at).total_seconds() < 15:
-                return entry.user
-    except Exception: pass
-    return None
-
-async def handle_nuke_event(guild: discord.Guild, member: Optional[discord.Member], action: str, target_desc: str, restore_func=None):
-    if not config.ANTI_NUKE_ENABLED or member is None or member.bot or is_exempted(member): return
-    if not is_nuke(guild.id, member.id, action): return
-    if restore_func:
-        try: await restore_func()
-        except Exception: pass
-    NUKE_STRIKES[guild.id][member.id] += 1
-    await save_nuke_strikes()
-    ok, msg = await apply_jail(guild, member, f"Anti-Nuke: {action} (المرة {NUKE_STRIKES[guild.id][member.id]})")
-    log_ch = get_ch_log_nuke(guild)
-    if log_ch:
-        embed = discord.Embed(title="🚨 محاولة تخريب", description=f"**تم كشف نشاط تخريبي وصدّه**\n\n👤 المخرب: {member.mention}\n⚔️ العملية: {action}\n🎯 الهدف: {target_desc}\n🔨 العقوبة: {msg}", color=discord.Color.red())
-        try: await log_ch.send(embed=embed)
-        except Exception: pass# ═══════════════════════════════════════════════════════════════
-# 🗂️ Cache للرومات والرتب (النسخ الاحتياطي)
-# ═══════════════════════════════════════════════════════════════
-def snapshot_channel(channel: discord.abc.GuildChannel) -> dict:
-    base = {"name": channel.name, "position": channel.position, "category_id": channel.category_id, "overwrites": {}}
-    for target, ow in channel.overwrites.items():
-        allow, deny = ow.pair()
-        base["overwrites"][str(target.id)] = {"type": "role" if isinstance(target, discord.Role) else "member", "allow": allow.value, "deny": deny.value}
-    if isinstance(channel, discord.TextChannel): base.update({"kind": "text", "topic": channel.topic, "nsfw": channel.nsfw, "slowmode": channel.slowmode_delay})
-    elif isinstance(channel, discord.VoiceChannel): base.update({"kind": "voice", "bitrate": channel.bitrate, "user_limit": channel.user_limit})
-    elif isinstance(channel, discord.CategoryChannel): base["kind"] = "category"
-    else: base["kind"] = "unknown"
-    return base
-
-def snapshot_role(role: discord.Role) -> dict:
-    return {"name": role.name, "color": role.color.value, "permissions": role.permissions.value, "position": role.position, "hoist": role.hoist, "mentionable": role.mentionable, "unicode_emoji": role.unicode_emoji}
-
-def rebuild_overwrites(guild: discord.Guild, overwrites_data: dict) -> dict:
-    result = {}
-    for tid_str, ow in overwrites_data.items():
-        target = guild.get_role(int(tid_str)) if ow["type"] == "role" else guild.get_member(int(tid_str))
-        if target: result[target] = discord.PermissionOverwrite.from_pair(discord.Permissions(ow["allow"]), discord.Permissions(ow["deny"]))
-    return result
-
-async def cache_full_guild(guild: discord.Guild):
-    channels_data = {ch.id: snapshot_channel(ch) for ch in guild.channels}
-    roles_data = {r.id: snapshot_role(r) for r in guild.roles if not r.is_default() and not r.managed}
-    GUILD_CACHE[guild.id] = {"channels": channels_data, "roles": roles_data}
-    await async_save_json(config.GUILD_CACHE_FILE, {str(gid): {"channels": {str(k): v for k, v in d["channels"].items()}, "roles": {str(k): v for k, v in d["roles"].items()}} for gid, d in GUILD_CACHE.items()})
-
-async def restore_channel_from_cache(guild: discord.Guild, ch_id: int):
-    cache = GUILD_CACHE.get(guild.id)
-    if not cache or ch_id not in cache["channels"]: return
-    data = cache["channels"][ch_id]
-    category = guild.get_channel(data.get("category_id")) if data.get("category_id") else None
-    if category and not isinstance(category, discord.CategoryChannel): category = None
-    try:
-        ow = rebuild_overwrites(guild, data.get("overwrites", {}))
-        kind = data.get("kind")
-        if kind == "text": await guild.create_text_channel(name=data["name"], category=category, topic=data.get("topic"), slowmode_delay=data.get("slowmode", 0), overwrites=ow, reason="Anti-Nuke: استرجاع")
-        elif kind == "voice": await guild.create_voice_channel(name=data["name"], category=category, bitrate=data.get("bitrate", 64000), overwrites=ow, reason="Anti-Nuke: استرجاع")
-        elif kind == "category": await guild.create_category(name=data["name"], overwrites=ow, reason="Anti-Nuke: استرجاع")
-    except Exception as e: log.warning("فشل استرجاع الروم: %s", e)
-
-async def restore_role_from_cache(guild: discord.Guild, role_id: int):
-    cache = GUILD_CACHE.get(guild.id)
-    if not cache or role_id not in cache["roles"]: return
-    data = cache["roles"][role_id]
-    try:
-        await guild.create_role(name=data["name"], color=discord.Color(data["color"]), permissions=discord.Permissions(data["permissions"]), hoist=data["hoist"], mentionable=data["mentionable"], reason="Anti-Nuke: استرجاع")
-    except Exception as e: log.warning("فشل استرجاع الرتبة: %s", e)
-
-# ═══════════════════════════════════════════════════════════════
-# 🚨 أحداث Anti-Nuke
-# ═══════════════════════════════════════════════════════════════
-@bot.event
-async def on_guild_channel_delete(channel: discord.abc.GuildChannel):
-    await asyncio.sleep(1)
-    executor = await get_audit_executor(channel.guild, discord.AuditLogAction.channel_delete, channel.id)
-    if executor and (executor.id == bot.user.id or is_exempted(executor)): return
-    await restore_channel_from_cache(channel.guild, channel.id)
-    if executor: await handle_nuke_event(channel.guild, executor, "channel_delete", channel.name)
-
-@bot.event
-async def on_guild_channel_create(channel: discord.abc.GuildChannel):
-    await asyncio.sleep(1)
-    executor = await get_audit_executor(channel.guild, discord.AuditLogAction.channel_create, channel.id)
-    if executor and (executor.id == bot.user.id or is_exempted(executor)): return
-    if executor:
-        async def delete_new():
-            try: await channel.delete(reason="Anti-Nuke")
-            except Exception: pass
-        await handle_nuke_event(channel.guild, executor, "channel_create", channel.name, restore_func=delete_new)
-
-@bot.event
-async def on_guild_role_delete(role: discord.Role):
-    if role.is_default() or role.managed: return
-    await asyncio.sleep(1)
-    executor = await get_audit_executor(role.guild, discord.AuditLogAction.role_delete, role.id)
-    if executor and (executor.id == bot.user.id or is_exempted(executor)): return
-    await restore_role_from_cache(role.guild, role.id)
-    if executor: await handle_nuke_event(role.guild, executor, "role_delete", role.name)
-
-@bot.event
-async def on_guild_role_create(role: discord.Role):
-    if role.managed: return
-    await asyncio.sleep(1)
-    executor = await get_audit_executor(role.guild, discord.AuditLogAction.role_create, role.id)
-    if executor and (executor.id == bot.user.id or is_exempted(executor)): return
-    if executor:
-        async def delete_new():
-            try: await role.delete(reason="Anti-Nuke")
-            except Exception: pass
-        await handle_nuke_event(role.guild, executor, "role_create", role.name, restore_func=delete_new)
-
-@bot.event
-async def on_member_ban(guild: discord.Guild, user: discord.User):
-    await asyncio.sleep(1)
-    executor = await get_audit_executor(guild, discord.AuditLogAction.ban, user.id)
-    if executor and (executor.id == bot.user.id or is_exempted(executor)): return
-    if not executor: return
-    is_protected = (user.id == config.BOT_OWNER_ID or user.id in deputy_user_ids or user.id in protected_users_list or user.id == guild.owner_id)
-    if is_protected:
-        try: await guild.unban(user, reason="Anti-Nuke")
-        except Exception: pass
-        await apply_jail(guild, executor, "حظر عضو محمي")
-    else:
-        async def unban():
-            try: await guild.unban(user, reason="Anti-Nuke")
-            except Exception: pass
-        await handle_nuke_event(guild, executor, "ban", str(user), restore_func=unban)
-
-# ═══════════════════════════════════════════════════════════════
-# 👋 أحداث الأعضاء (ترحيب، حماية، مغادرة)
-# ═══════════════════════════════════════════════════════════════
-@bot.event
-async def on_member_join(member: discord.Member):
-    try: await member.send(f"🇸🇦 **أهلاً بك في {member.guild.name}**\n\n{config.RULES_TEXT}")
-    except Exception: pass
-    ch = get_ch_welcome(member.guild)
-    if ch:
-        embed = discord.Embed(title="🇸🇦 عضو جديد!", description=f"أهلاً {member.mention}\nنتمنى لك وقتاً ممتعاً.\n\nعدد الأعضاء: **{member.guild.member_count}**", color=discord.Color.green())
-        embed.set_thumbnail(url=member.display_avatar.url)
-        try: await ch.send(content=member.mention, embed=embed)
-        except Exception: pass
-
-@bot.event
-async def on_member_remove(member: discord.Member):
-    await asyncio.sleep(1)
-    executor = await get_audit_executor(member.guild, discord.AuditLogAction.kick, member.id)
-    if executor and not is_exempted(executor) and executor.id != bot.user.id:
-        await handle_nuke_event(member.guild, executor, "kick", str(member))
-        return
-    ch = get_ch_log_leave(member.guild)
-    if ch:
-        try: await ch.send(embed=discord.Embed(title="📤 عضو غادر", description=f"**{member}** غادر السيرفر\nالأعضاء الآن: {member.guild.member_count}", color=discord.Color.red()))
-        except Exception: pass
-
-@bot.event
-async def on_member_update(before: discord.Member, after: discord.Member):
-    if before.roles != after.roles:
-        if is_exempted(after) and after.id != bot.user.id:
-            removed = [r for r in before.roles if r not in after.roles and r != after.guild.default_role and r != get_role_jail(after.guild)]
-            if removed:
-                await asyncio.sleep(1)
-                executor = await get_audit_executor(after.guild, discord.AuditLogAction.member_role_update, after.id)
-                if executor and not is_exempted(executor) and executor.id != bot.user.id:
-                    try: await after.add_roles(*removed)
-                    except Exception: pass
-                    await apply_jail(after.guild, executor, f"محاولة سحب رتب من محمي: {after}")
-        
-        added = [r for r in after.roles if r not in before.roles]
-        if added and after.id != bot.user.id:
-            if getattr(config, "ROLE_NOTIFY_ENABLED", True):
-                try: await after.send("🎖️ **رتب جديدة:**\n" + "\n".join([f"• {r.mention}" for r in added]))
-                except Exception: pass
-
-# ═══════════════════════════════════════════════════════════════
-# 💬 فلترة الرسائل
-# ═══════════════════════════════════════════════════════════════
-@bot.event
-async def on_message(message: discord.Message):
-    if message.author.bot or not message.guild: return
-    if is_exempted(message.author):
-        await bot.process_commands(message)
-        return
-    
-    violation = None
-    raw = message.content or ""
-    if message.mention_everyone: violation = "منشن الجميع"
-    else:
-        _, cleaned, collapsed = normalize_text(raw)
-        if BAD_WORDS_RE.search(cleaned) or BAD_WORDS_RE.search(collapsed): violation = "ألفاظ نابية"
-        elif URL_REGEX.search(raw): violation = "روابط"
-        
-    if violation:
-        try: await message.delete()
-        except Exception: pass
-        USER_WARNINGS.setdefault(message.author.id, []).append({"reason": violation, "date": datetime.datetime.now().strftime("%Y-%m-%d")})
-        await save_warnings()
-        warns = len(USER_WARNINGS[message.author.id])
-        if violation == "ألفاظ نابية" or warns >= 3:
-            await apply_jail(message.guild, message.author, f"مخالفة: {violation}")
-        else:
-            try: await message.author.timeout(discord.utils.utcnow() + datetime.timedelta(hours=1), reason=violation)
-            except Exception: pass
-        
-        log_ch = get_ch_log_auto(message.guild)
-        if log_ch:
-            try: await log_ch.send(embed=discord.Embed(title="🚨 مخالفة", description=f"العضو: {message.author.mention}\nالمخالفة: {violation}\nالإنذارات: {warns}/3", color=discord.Color.red()))
-            except Exception: pass
-    else:
-        await bot.process_commands(message)# ═══════════════════════════════════════════════════════════════
-# 📜 نظام البرقيات (Tickets)
-# ═══════════════════════════════════════════════════════════════
-class TicketModal(Modal, title="📜 إرسال برقية رسمية"):
-    subject = TextInput(label="الموضوع", placeholder="اكتب موضوع البرقية...", required=True, max_length=100)
-    problem = TextInput(label="المشكلة / الطلب", style=discord.TextStyle.paragraph, placeholder="اشرح مشكلتك...", required=True, max_length=1000)
-    extra = TextInput(label="ملاحظات إضافية (اختياري)", style=discord.TextStyle.paragraph, required=False, max_length=500)
-
-    async def on_submit(self, interaction: discord.Interaction):
-        guild = interaction.guild
-        category = get_cat_ticket(guild)
-        if not category:
-            await interaction.response.send_message("❌ لم أجد تصنيف البرقيات.", ephemeral=True)
-            return
-        existing = next((ch for ch in category.text_channels if str(interaction.user.id) in ch.name), None)
-        if existing:
-            await interaction.response.send_message(f"⚠️ لديك برقية مفتوحة: {existing.mention}", ephemeral=True)
-            return
-            
-        ticket_role = get_role_ticket(guild)
-        overwrites = {
-            guild.default_role: discord.PermissionOverwrite(view_channel=False),
-            interaction.user: discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True),
-            guild.me: discord.PermissionOverwrite(view_channel=True, send_messages=True),
-        }
-        if ticket_role: overwrites[ticket_role] = discord.PermissionOverwrite(view_channel=True, send_messages=True)
-        
-        try:
-            ch = await guild.create_text_channel(f"ticket-{interaction.user.id}", category=category, overwrites=overwrites)
-        except Exception as e:
-            await interaction.response.send_message(f"❌ فشل فتح البرقية: {e}", ephemeral=True)
-            return
-
-        embed = discord.Embed(title="📜 برقية رسمية", color=discord.Color.green(), timestamp=discord.utils.utcnow())
-        embed.add_field(name="👤 العضو", value=interaction.user.mention, inline=False)
-        embed.add_field(name="📋 الموضوع", value=f"```{self.subject.value}```", inline=False)
-        embed.add_field(name="📝 التفاصيل", value=self.problem.value[:1024], inline=False)
-        if self.extra.value: embed.add_field(name="📎 ملاحظات", value=self.extra.value[:1024], inline=False)
-        
-        try: await ch.send(content=f"{interaction.user.mention} | {ticket_role.mention if ticket_role else ''}", embed=embed, view=CloseTicketButton())
-        except Exception: pass
-        
-        await interaction.response.send_message(f"✅ تم فتح برقيتك: {ch.mention}", ephemeral=True)
+class TicketModal(Modal, title="📜 إرسال برقية"):
+    subject = TextInput(label="الموضوع", required=True)
+    problem = TextInput(label="المشكلة", style=discord.TextStyle.paragraph, required=True)
+    async def on_submit(self, i):
+        cat = get_cat_ticket(i.guild)
+        if not cat: return await i.response.send_message("❌ لا يوجد تصنيف.", ephemeral=True)
+        tr = get_role_ticket(i.guild)
+        ow = {i.guild.default_role: discord.PermissionOverwrite(view_channel=False), i.user: discord.PermissionOverwrite(view_channel=True), i.guild.me: discord.PermissionOverwrite(view_channel=True)}
+        if tr: ow[tr] = discord.PermissionOverwrite(view_channel=True)
+        ch = await i.guild.create_text_channel(f"ticket-{i.user.id}", category=cat, overwrites=ow)
+        embed = discord.Embed(title="📜 برقية", description=f"**الموضوع:** {self.subject.value}\n**المشكلة:** {self.problem.value}", color=discord.Color.green())
+        await ch.send(content=f"{i.user.mention} | {tr.mention if tr else ''}", embed=embed, view=CloseTicketButton())
+        await i.response.send_message(f"✅ تم فتح البرقية: {ch.mention}", ephemeral=True)
 
 class NoteModal(Modal, title="📝 إرسال ملاحظة"):
-    note = TextInput(label="الملاحظة", style=discord.TextStyle.paragraph, placeholder="اكتب ملاحظتك...", required=True, max_length=1000)
-    async def on_submit(self, interaction: discord.Interaction):
-        embed = discord.Embed(title="📝 ملاحظة جديدة", color=discord.Color.blue(), timestamp=discord.utils.utcnow())
-        embed.set_author(name=str(interaction.user), icon_url=interaction.user.display_avatar.url)
-        embed.add_field(name="👤 العضو", value=interaction.user.mention, inline=False)
-        embed.add_field(name="📝 الملاحظة", value=f"```{self.note.value[:1000]}```", inline=False)
-        
-        log_ch = get_ch_admin_review(interaction.guild)
-        if log_ch:
-            try: await log_ch.send(embed=embed)
-            except Exception: pass
-        try:
-            owner = await interaction.client.fetch_user(config.BOT_OWNER_ID)
-            if owner: await owner.send(embed=embed)
-        except Exception: pass
-        await interaction.response.send_message("✅ **تم إرسال ملاحظتك للإدارة بنجاح!**", ephemeral=True)
+    note = TextInput(label="الملاحظة", style=discord.TextStyle.paragraph, required=True)
+    async def on_submit(self, i):
+        embed = discord.Embed(title="📝 ملاحظة", description=f"من: {i.user.mention}\nالملاحظة: {self.note.value}", color=discord.Color.blue())
+        ch = get_ch_admin_review(i.guild)
+        if ch: await ch.send(embed=embed)
+        try: await (await i.client.fetch_user(config.BOT_OWNER_ID)).send(embed=embed)
+        except: pass
+        await i.response.send_message("✅ تم إرسال الملاحظة.", ephemeral=True)
 
 class TicketButtonView(View):
     def __init__(self): super().__init__(timeout=None)
-    
-    @discord.ui.button(label="📜 إرسال برقية", style=discord.ButtonStyle.success, custom_id="btn_ticket")
-    async def send_ticket(self, interaction: discord.Interaction, button: Button): await interaction.response.send_modal(TicketModal())
-    
-    @discord.ui.button(label="📝 إرسال ملاحظة", style=discord.ButtonStyle.primary, custom_id="btn_note")
-    async def send_note(self, interaction: discord.Interaction, button: Button): await interaction.response.send_modal(NoteModal())
-    
-    @discord.ui.button(label="🔄 إعادة تشغيل الأزرار", style=discord.ButtonStyle.danger, custom_id="btn_restart")
-    async def restart_panel(self, interaction: discord.Interaction, button: Button):
-        if not await require_control(interaction): return
-        await interaction.response.defer(ephemeral=True)
-        bot.add_view(TicketButtonView())
-        bot.add_view(CloseTicketButton())
-        bot.add_view(ApplicationButtonView())
-        await interaction.message.edit(view=TicketButtonView())
-        await interaction.followup.send("✅ تم إعادة تشغيل الأزرار بنجاح!", ephemeral=True)
+    @discord.ui.button(label="📜 إرسال برقية", style=discord.ButtonStyle.success, custom_id="btn_t1")
+    async def b1(self, i, b): await i.response.send_modal(TicketModal())
+    @discord.ui.button(label="📝 إرسال ملاحظة", style=discord.ButtonStyle.primary, custom_id="btn_t2")
+    async def b2(self, i, b): await i.response.send_modal(NoteModal())
+    @discord.ui.button(label="🔄 إعادة تشغيل", style=discord.ButtonStyle.danger, custom_id="btn_t3")
+    async def b3(self, i, b):
+        if not await require_control(i): return
+        bot.add_view(TicketButtonView()); bot.add_view(CloseTicketButton()); bot.add_view(ApplicationButtonView())
+        await i.message.edit(view=TicketButtonView())
+        await i.response.send_message("✅ تم التحديث.", ephemeral=True)
 
 class CloseTicketButton(View):
     def __init__(self): super().__init__(timeout=None)
-    @discord.ui.button(label="🔒 إغلاق البرقية", style=discord.ButtonStyle.red, custom_id="btn_close_ticket")
-    async def close_ticket(self, interaction: discord.Interaction, button: Button):
-        roles = interaction.user.roles if isinstance(interaction.user, discord.Member) else []
-        if not ((get_role_ticket(interaction.guild) in roles) or (get_role_minister(interaction.guild) in roles) or has_control(interaction.user.id)):
-            await interaction.response.send_message("❌ لا تمتلك الصلاحية.", ephemeral=True)
-            return
-        await interaction.response.send_message("🔒 سيتم إغلاق البرقية خلال دقيقة...", ephemeral=True)
+    @discord.ui.button(label="🔒 إغلاق", style=discord.ButtonStyle.red, custom_id="btn_c1")
+    async def c1(self, i, b):
+        roles = i.user.roles if isinstance(i.user, discord.Member) else []
+        if not ((get_role_ticket(i.guild) in roles) or (get_role_minister(i.guild) in roles) or has_control(i.user.id)):
+            return await i.response.send_message("❌ لا تمتلك الصلاحية.", ephemeral=True)
+        await i.response.send_message("🔒 سيغلق بعد دقيقة.", ephemeral=True)
         await asyncio.sleep(60)
-        try: await interaction.channel.delete()
-        except Exception: pass
+        await i.channel.delete()
 
-# ═══════════════════════════════════════════════════════════════
-# 🇸🇦 نظام الجنسية
-# ═══════════════════════════════════════════════════════════════
-class ApplicationModal(Modal, title="🇸🇦 استمارة الهوية"):
-    q1 = TextInput(label="الاسم", placeholder="الاسم الذي سيظهر كلقب...", required=True, max_length=32)
-    q2 = TextInput(label="العمر", placeholder="عمرك...", required=True, max_length=10)
-    q3 = TextInput(label="سبب الانضمام", style=discord.TextStyle.paragraph, required=True, max_length=500)
-
-    async def on_submit(self, interaction: discord.Interaction):
-        admin_ch = get_ch_log_tickets(interaction.guild)
-        if not admin_ch:
-            await interaction.response.send_message("❌ لم أجد روم استقبال التقديمات.", ephemeral=True)
-            return
-        embed = discord.Embed(title="🇸🇦 طلب جنسية جديد", color=discord.Color.green(), timestamp=discord.utils.utcnow())
-        embed.set_author(name=interaction.user.name, icon_url=interaction.user.display_avatar.url)
-        embed.add_field(name="المتقدم", value=interaction.user.mention, inline=False)
-        embed.add_field(name="الاسم", value=self.q1.value, inline=False)
-        embed.add_field(name="العمر", value=self.q2.value, inline=False)
-        embed.add_field(name="السبب", value=self.q3.value, inline=False)
-        await admin_ch.send(embed=embed, view=AdminDecisionView(member=interaction.user, apply_name=self.q1.value))
-        await interaction.response.send_message("✅ تم إرسال طلبك للإدارة!", ephemeral=True)
+class ApplicationModal(Modal, title="🇸🇦 استمارة"):
+    q1 = TextInput(label="الاسم", max_length=32, required=True)
+    q2 = TextInput(label="العمر", required=True)
+    async def on_submit(self, i):
+        ch = get_ch_log_tickets(i.guild)
+        if not ch: return await i.response.send_message("❌ لا يوجد روم.", ephemeral=True)
+        embed = discord.Embed(title="🇸🇦 طلب جنسية", description=f"من: {i.user.mention}\nالاسم: {self.q1.value}\nالعمر: {self.q2.value}", color=discord.Color.green())
+        await ch.send(embed=embed, view=AdminDecisionView(member=i.user, apply_name=self.q1.value))
+        await i.response.send_message("✅ تم الإرسال.", ephemeral=True)
 
 class ApplicationButtonView(View):
     def __init__(self): super().__init__(timeout=None)
-    @discord.ui.button(label="🇸🇦 التقديم للجنسية", style=discord.ButtonStyle.success, custom_id="btn_apply")
-    async def apply_button(self, interaction: discord.Interaction, button: Button): await interaction.response.send_modal(ApplicationModal())
+    @discord.ui.button(label="🇸🇦 التقديم", style=discord.ButtonStyle.success, custom_id="btn_a1")
+    async def a1(self, i, b): await i.response.send_modal(ApplicationModal())
 
 class AdminDecisionView(View):
-    def __init__(self, member: discord.Member, apply_name: str = ""):
-        super().__init__(timeout=None)
-        self.member = member
-        self.apply_name = apply_name or ""
+    def __init__(self, member, apply_name): super().__init__(timeout=None); self.member, self.apply_name = member, apply_name
+    async def chk(self, i):
+        roles = i.user.roles if isinstance(i.user, discord.Member) else []
+        if (get_role_apply(i.guild) in roles) or (get_role_minister(i.guild) in roles) or has_control(i.user.id): return True
+        await i.response.send_message("❌ لا تمتلك الصلاحية.", ephemeral=True); return False
+    @discord.ui.button(label="✅ قبول", style=discord.ButtonStyle.success, custom_id="btn_ad1")
+    async def ad1(self, i, b):
+        if not await self.chk(i): return
+        cr = get_role_citizen(i.guild)
+        if cr: await self.member.add_roles(cr)
+        try: await self.member.edit(nick=self.apply_name)
+        except: pass
+        await i.message.edit(view=None)
+        await i.response.send_message("✅ تم القبول.", ephemeral=True)
+    @discord.ui.button(label="❌ رفض", style=discord.ButtonStyle.red, custom_id="btn_ad2")
+    async def ad2(self, i, b):
+        if not await self.chk(i): return
+        await i.message.edit(view=None)
+        await i.response.send_message("❌ تم الرفض.", ephemeral=True)
 
-    async def _check_perm(self, interaction: discord.Interaction) -> bool:
-        roles = interaction.user.roles if isinstance(interaction.user, discord.Member) else []
-        if (get_role_apply(interaction.guild) in roles) or (get_role_minister(interaction.guild) in roles) or has_control(interaction.user.id):
-            return True
-        await interaction.response.send_message("❌ لا تمتلك الصلاحية.", ephemeral=True)
-        return False
-
-    @discord.ui.button(label="✅ قبول", style=discord.ButtonStyle.success, custom_id="btn_accept")
-    async def accept_app(self, interaction: discord.Interaction, button: Button):
-        if not await self._check_perm(interaction): return
-        citizen_role = get_role_citizen(interaction.guild)
-        role_status = ""
-        if citizen_role:
-            try:
-                await self.member.add_roles(citizen_role)
-                role_status = f"\n🎖️ الرتبة: {citizen_role.mention}"
-            except Exception: role_status = "\n⚠️ فشل إعطاء الرتبة"
-            
-        nick_status = ""
-        clean_name = self.apply_name.strip()[:32]
-        if clean_name:
-            try:
-                await self.member.edit(nick=clean_name)
-                nick_status = f"\n📝 اللقب: {clean_name}"
-            except Exception: nick_status = "\n⚠️ فشل تغيير اللقب"
-            
-        try: await self.member.send(f"🎉 **مبروك!**\nتم قبول طلبك.\n{role_status}\n{nick_status}")
-        except Exception: pass
-        
-        await interaction.message.edit(view=None)
-        await interaction.response.send_message(f"✅ تم قبول {self.member.mention}", ephemeral=True)
-
-    @discord.ui.button(label="❌ رفض", style=discord.ButtonStyle.red, custom_id="btn_reject")
-    async def reject_app(self, interaction: discord.Interaction, button: Button):
-        if not await self._check_perm(interaction): return
-        try: await self.member.send("❌ نأسف، تم رفض طلبك.")
-        except Exception: pass
-        await interaction.message.edit(view=None)
-        await interaction.response.send_message(f"❌ تم رفض {self.member.mention}", ephemeral=True)
 # ═══════════════════════════════════════════════════════════════
-# ⚙️ الأوامر الأساسية
+# 🚨 أوامر الإدارة الشاملة
 # ═══════════════════════════════════════════════════════════════
+@bot.tree.command(name="بانل_البرقيات", description="📜 بانل")
+async def p1(i):
+    if not await require_control(i): return
+    ch = get_ch_ticket_panel(i.guild)
+    if ch: await ch.send(embed=discord.Embed(title="📜 البرقيات", color=0x007A3D), view=TicketButtonView()); await i.response.send_message("✅", ephemeral=True)
+    else: await i.response.send_message("❌ لم أجد الروم.", ephemeral=True)
 
-@bot.tree.command(name="بانل_البرقيات", description="📜 إرسال بانل البرقيات الرسمية")
-async def send_ticket_panel(interaction: discord.Interaction):
-    if not await require_control(interaction): return
-    ch = get_ch_ticket_panel(interaction.guild)
-    if not ch:
-        await interaction.response.send_message("❌ لم أجد روم بانل البرقيات.", ephemeral=True)
-        return
-    await interaction.response.defer(ephemeral=True)
-    embed = discord.Embed(title="📜 البرقيات الرسمية", description="━━━━━━━━━━━━━━━━━━━━━━━━━\n\n**هل تحتاج مساعدة؟** 🇸🇦\n\nأرسل برقية رسمية للإدارة\n\n━━━━━━━━━━━━━━━━━━━━━━━━━\n📝 **الخطوات:**\n• اضغط الزر أدناه\n• اكتب موضوعك\n• سيُفتح لك روم خاص\n━━━━━━━━━━━━━━━━━━━━━━━━━", color=discord.Color.from_rgb(0, 122, 61))
-    embed.set_footer(text="🇸🇦〢Kingdom of Saudi Arabia — مركز البرقيات")
-    await ch.send(embed=embed, view=TicketButtonView())
-    await interaction.followup.send("✅ تم إرسال بانل البرقيات.", ephemeral=True)
+@bot.tree.command(name="بانل_الجنسية", description="🇸🇦 جنسية")
+async def p2(i):
+    if not await require_control(i): return
+    ch = get_ch_apply_panel(i.guild)
+    if ch: await ch.send(embed=discord.Embed(title="🇸🇦 التقديم", color=0x007A3D), view=ApplicationButtonView()); await i.response.send_message("✅", ephemeral=True)
+    else: await i.response.send_message("❌ لم أجد الروم.", ephemeral=True)
 
-@bot.tree.command(name="بانل_الجنسية", description="🇸🇦 إرسال بانل التقديم للجنسية")
-async def send_apply_panel(interaction: discord.Interaction):
-    if not await require_control(interaction): return
-    ch = get_ch_apply_panel(interaction.guild)
-    if not ch:
-        await interaction.response.send_message("❌ لم أجد روم بانل الجنسية.", ephemeral=True)
-        return
-    await interaction.response.defer(ephemeral=True)
-    embed = discord.Embed(title="🇸🇦 التقديم للجنسية", description="━━━━━━━━━━━━━━━━━━━━━━━━━\n\n📜 **للحصول على الجنسية:**\nاضغط على الزر أدناه\n\n━━━━━━━━━━━━━━━━━━━━━━━━━", color=discord.Color.from_rgb(0, 122, 61))
-    embed.set_footer(text="🇸🇦〢Kingdom of Saudi Arabia — نظام الجنسية")
-    await ch.send(embed=embed, view=ApplicationButtonView())
-    await interaction.followup.send("✅ تم إرسال بانل الجنسية.", ephemeral=True)
+@bot.tree.command(name="أمر_توقيف", description="🚔 توقيف")
+async def c_jail(i, member: discord.Member, reason: str = "لم يحدد"):
+    if not await require_control(i): return
+    ok, msg = await apply_jail(i.guild, member, reason, issued_by=i.user); await i.response.send_message(msg, ephemeral=True)
 
-@bot.tree.command(name="أمر_توقيف", description="🚔 توقيف عضو")
-@discord.app_commands.describe(member="العضو", reason="السبب")
-async def jail_cmd(interaction: discord.Interaction, member: discord.Member, reason: str = "لم يحدد"):
-    if not await require_control(interaction): return
-    ok, msg = await apply_jail(interaction.guild, member, reason, issued_by=interaction.user)
-    await interaction.response.send_message(msg, ephemeral=True)
+@bot.tree.command(name="أمر_إفراج", description="🔓 إفراج")
+async def c_unjail(i, member: discord.Member):
+    if not await require_control(i): return
+    ok, msg = await remove_jail(i.guild, member); await i.response.send_message(msg, ephemeral=True)
 
-@bot.tree.command(name="أمر_إفراج", description="🔓 فك توقيف عضو")
-@discord.app_commands.describe(member="العضو")
-async def unjail_cmd(interaction: discord.Interaction, member: discord.Member):
-    if not await require_control(interaction): return
-    ok, msg = await remove_jail(interaction.guild, member)
-    await interaction.response.send_message(msg, ephemeral=True)
-
-@bot.tree.command(name="إنذار_رسمي", description="⚠️ إنذار رسمي")
-@discord.app_commands.describe(member="العضو", reason="السبب")
-async def warn_cmd(interaction: discord.Interaction, member: discord.Member, reason: str = "لم يحدد"):
-    if not await require_control(interaction): return
+@bot.tree.command(name="إنذار_رسمي", description="⚠️ إنذار")
+async def c_warn(i, member: discord.Member, reason: str = "لم يحدد"):
+    if not await require_control(i): return
     USER_WARNINGS.setdefault(member.id, []).append({"reason": reason, "date": str(datetime.datetime.now())})
     await save_warnings()
-    await interaction.response.send_message(f"✅ تم إنذار {member.mention}. الإجمالي: {len(USER_WARNINGS[member.id])}", ephemeral=True)
+    if len(USER_WARNINGS[member.id]) >= 3: await apply_jail(i.guild, member, "3 إنذارات")
+    await i.response.send_message(f"✅ إنذار. الإجمالي: {len(USER_WARNINGS[member.id])}", ephemeral=True)
 
-@bot.tree.command(name="تفتيش_المملكة", description="🔍 فحص الرومات والرتب")
-async def check_setup(interaction: discord.Interaction):
-    if not await require_control(interaction): return
-    await interaction.response.send_message("✅ النظام يعمل بشكل سليم.", ephemeral=True)
+@bot.tree.command(name="سجل_الإنذارات", description="📋 سجل")
+async def c_log(i, member: discord.Member):
+    warns = USER_WARNINGS.get(member.id, [])
+    await i.response.send_message(embed=discord.Embed(title=f"إنذارات {member.name}", description="\n".join([f"- {w['reason']}" for w in warns]) or "لا يوجد", color=discord.Color.orange()), ephemeral=True)
 
-@bot.tree.command(name="تعيين_وزير", description="👑 تعيين وزير")
-@discord.app_commands.describe(member="العضو")
-async def setdeputy_cmd(interaction: discord.Interaction, member: discord.Member):
-    if not await require_owner(interaction): return
-    if member.id not in deputy_user_ids:
-        deputy_user_ids.append(member.id)
-        await save_state()
-        await interaction.response.send_message(f"✅ تم تعيين {member.mention} وزيراً.", ephemeral=True)
-    else:
-        await interaction.response.send_message("⚠️ هو وزير بالفعل.", ephemeral=True)
+@bot.tree.command(name="تفتيش_المملكة", description="🔍 تفتيش")
+async def c_check(i):
+    if not await require_control(i): return
+    await i.response.send_message("✅ النظام يعمل والإعدادات سليمة.", ephemeral=True)
 
-@bot.tree.command(name="حماية_مواطن", description="🛡️ حماية عضو")
-@discord.app_commands.describe(member="العضو")
-async def protect_person_cmd(interaction: discord.Interaction, member: discord.Member):
-    if not await require_control(interaction): return
-    if member.id not in protected_users_list:
-        protected_users_list.append(member.id)
-        await save_state()
-        await interaction.response.send_message(f"🛡️ تم حماية {member.mention}.", ephemeral=True)
-    else:
-        await interaction.response.send_message("⚠️ محمي بالفعل.", ephemeral=True)
+@bot.tree.command(name="تعيين_وزير", description="👑 وزير")
+async def c_min(i, member: discord.Member):
+    if not await require_owner(i): return
+    if member.id not in deputy_user_ids: deputy_user_ids.append(member.id); await save_state(); await i.response.send_message("✅", ephemeral=True)
 
-@bot.tree.command(name="تنظيف", description="🗑️ حذف رسائل")
-@discord.app_commands.describe(amount="عدد الرسائل")
-async def clear_cmd(interaction: discord.Interaction, amount: int):
-    if not await require_control(interaction): return
-    await interaction.response.defer(ephemeral=True)
-    deleted = await interaction.channel.purge(limit=amount)
-    await interaction.followup.send(f"✅ تم حذف {len(deleted)} رسالة.", ephemeral=True)
+@bot.tree.command(name="حماية_مواطن", description="🛡️ حماية")
+async def c_prot(i, member: discord.Member):
+    if not await require_control(i): return
+    if member.id not in protected_users_list: protected_users_list.append(member.id); await save_state(); await i.response.send_message("✅", ephemeral=True)
+
+@bot.tree.command(name="تنظيف", description="🗑️ حذف")
+async def c_clear(i, amount: int):
+    if not await require_control(i): return
+    await i.response.defer(ephemeral=True); d = await i.channel.purge(limit=amount); await i.followup.send(f"✅ {len(d)}", ephemeral=True)
+
 # ═══════════════════════════════════════════════════════════════
 # 🎬 التشغيل
 # ═══════════════════════════════════════════════════════════════
 @bot.event
 async def on_ready():
-    log.info("البوت متصل: %s (ID: %s)", bot.user, bot.user.id)
-    bot.add_view(TicketButtonView())
-    bot.add_view(CloseTicketButton())
-    bot.add_view(ApplicationButtonView())
-    await load_all_state_async()
-    for guild in bot.guilds:
-        await cache_full_guild(guild)
-        
+    log.info("البوت متصل: %s", bot.user)
+    bot.add_view(TicketButtonView()); bot.add_view(CloseTicketButton()); bot.add_view(ApplicationButtonView())
+    await load_all_state()
     try:
-        # المزامنة الفورية لسيرفر محدد (حسب الآيدي الذي أرسلته)
-        GUILD_ID = 1475975508700303370
-        guild = discord.Object(id=GUILD_ID)
+        guild = discord.Object(id=1475975508700303370)
         bot.tree.copy_global_to(guild=guild)
         await bot.tree.sync(guild=guild)
-        log.info("تمت مزامنة الأوامر في سيرفرك بنجاح!")
-    except Exception as e: 
-        log.error("فشل مزامنة الأوامر: %s", e)
-def main():
-    if not TOKEN or TOKEN == "ضع_التوكن_هنا_إذا_لم_يعمل_المتغير":
-        log.error("❌ التوكن غير موجود! ضعه في الكود أو في المتغيرات.")
-        return
-    bot.run(TOKEN)
+        log.info("تمت مزامنة الأوامر بنجاح!")
+    except Exception as e: log.error("فشل المزامنة: %s", e)
+    
+    try:
+        import extras
+        extras.load_extras(bot, {"apply_jail": apply_jail, "remove_jail": remove_jail, "require_control": require_control, "is_exempted": is_exempted})
+    except: pass
 
 if __name__ == "__main__":
-    main()
+    if TOKEN and TOKEN != "ضع_التوكن_هنا": bot.run(TOKEN)
