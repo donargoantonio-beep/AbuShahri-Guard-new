@@ -1,7 +1,4 @@
 discord.py
-PyNaCl
-davey
-flask
-Pillow
 motor
-dnspython
+Pillow
+python-dotenv
