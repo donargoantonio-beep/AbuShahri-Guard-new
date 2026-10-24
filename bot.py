@@ -20,7 +20,7 @@ import config
 
 # ضع التوكن الخاص بك هنا مباشرة إذا لم يعمل من المتغيرات
 # أو اتركه فارغاً وضعه في Environment Variables في Wispbyte
-TOKEN = os.getenv("DISCORD_TOKEN", "ضع_التوكن_هنا_إذا_لم_يعمل_المتغير")
+TOKEN = "MTUxOTQ3Mjk0NTIyMTczMDUyNA.GnB-gR.5YE42EUdyXyNYBm6kDFpVe_BkWa88fs1E1O_f4"
 
 os.makedirs(config.LOGS_DIR, exist_ok=True)
 logging.basicConfig(
